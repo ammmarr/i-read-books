@@ -42,7 +42,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         const { added, skipped } = await importReadingList(items)
         toast({
           tone: added ? 'success' : 'info',
-          message: added ? `${added} books added to your reading list` : 'Nothing new in that list',
+          message: added ? `${added} ${added === 1 ? 'book' : 'books'} added to your reading list` : 'Nothing new in that list',
           description: added
             ? `${skipped ? `${skipped} already here. ` : ''}Add a PDF to any of them whenever you’re ready.`
             : 'Every title is already in your library.',

@@ -148,16 +148,25 @@ export async function enrichFromOpenLibrary() {
     const todo = await db.books.filter((b) => b.pageCount === 0 && !b.enriched && !b.coverUrl && !b.cover).toArray()
     for (const b of todo) {
       try {
-        const q = new URLSearchParams({ title: b.title, limit: '1', fields: 'author_name,cover_i,number_of_pages_median' })
+        const q = new URLSearchParams({ title: b.title, limit: '5', fields: 'title,author_name,cover_i,number_of_pages_median' })
         if (b.author) q.set('author', b.author)
-        let res = await fetch(`https://openlibrary.org/search.json?${q}`)
-        let json = res.ok ? await res.json() : null
-        if (!json?.docs?.length && b.author) {
-          q.delete('author')
-          res = await fetch(`https://openlibrary.org/search.json?${q}`)
-          json = res.ok ? await res.json() : null
+        type Doc = { title?: string; author_name?: string[]; cover_i?: number; number_of_pages_median?: number }
+        const search = async () => {
+          const res = await fetch(`https://openlibrary.org/search.json?${q}`)
+          return res.ok ? (((await res.json()) as { docs?: Doc[] }).docs ?? []) : []
         }
-        const doc = json?.docs?.[0] as { author_name?: string[]; cover_i?: number; number_of_pages_median?: number } | undefined
+        let docs = await search()
+        if (!docs.length && b.author) {
+          q.delete('author')
+          docs = await search()
+        }
+        // Only trust a result whose title really is this book — not a
+        // "Summary of …" or a workbook that happens to rank first.
+        const key = titleKey(b.title)
+        const doc = docs.find((d) => {
+          const k = titleKey(d.title ?? '')
+          return k === key || k.startsWith(key + ' ')
+        })
         const patch: Partial<Book> = {}
         if (doc?.cover_i) patch.coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`
         if (doc?.author_name?.[0] && !b.author) patch.author = doc.author_name[0]

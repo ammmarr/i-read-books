@@ -27,7 +27,7 @@ export default function ReadingList() {
   const reading = books.filter((b) => b.status === 'reading').sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0))
   const queued = books.filter((b) => b.status === 'queued').sort((a, b) => a.queueOrder - b.queueOrder)
   const finished = books.filter((b) => b.status === 'finished').sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0))
-  const queuePages = queued.reduce((a, b) => a + b.pageCount, 0)
+  const queuePages = queued.reduce((a, b) => a + (b.pageCount || b.estPages || 0), 0)
 
   return (
     <PageContainer className="max-w-[880px]">
