@@ -98,10 +98,13 @@ export function AccountSync() {
       </div>
       {sync.status === 'error' && sync.error && (
         <p className="mt-2 rounded-sm bg-warning/10 px-3 py-2 text-body-sm text-body">
-          {/relation .* does not exist|schema cache|Could not find the table/i.test(sync.error)
-            ? 'The database tables are missing — run supabase/schema.sql in your Supabase SQL editor.'
+          {/relation .* does not exist|schema cache|Could not find the (table|function)|column .* does not exist/i.test(sync.error)
+            ? 'Your cloud database needs setting up or updating — run the latest supabase/schema.sql in the Supabase SQL editor.'
             : sync.error}
         </p>
+      )}
+      {sync.status !== 'error' && sync.warning && (
+        <p className="mt-2 rounded-sm bg-warning/10 px-3 py-2 text-body-sm text-body">{sync.warning}</p>
       )}
       <p className="mt-3 text-body-sm text-mute">
         Your library, reading list, progress, highlights, notes and reading time sync across every device you sign in on. PDFs upload once and download on

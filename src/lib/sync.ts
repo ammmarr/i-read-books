@@ -22,9 +22,11 @@ interface State {
   status: SyncStatus
   lastSyncedAt: number | null
   error: string | null
+  /** Sync works, but the database is older than the app (some fields aren't saved). */
+  warning: string | null
 }
 
-let state: State = { status: supabase ? 'signed-out' : 'off', lastSyncedAt: null, error: null }
+let state: State = { status: supabase ? 'signed-out' : 'off', lastSyncedAt: null, error: null, warning: null }
 const listeners = new Set<() => void>()
 function set(patch: Partial<State>) {
   state = { ...state, ...patch }
@@ -210,24 +212,61 @@ async function downloadMissingCovers() {
   }
 }
 
+/**
+ * Columns the server doesn't have yet — the app is newer than the schema.sql
+ * that was run. Rows are sent without them (so everything else still syncs)
+ * and Settings asks for the schema to be updated.
+ */
+const missingColumns = new Map<string, Set<string>>()
+
+function noteMissingColumn(table: string, column: string) {
+  const s = missingColumns.get(table) ?? new Set<string>()
+  s.add(column)
+  missingColumns.set(table, s)
+  set({ warning: 'Your cloud database is older than this app, so a few details (like hand-edited progress) aren’t saved. Run the latest supabase/schema.sql once to finish the update.' })
+}
+
+async function upsertRows(table: string, rows: Row[]) {
+  const sb = supabase!
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const skip = missingColumns.get(table)
+    const payload = skip?.size ? rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !skip.has(k)))) : rows
+    const { error } = await sb.from(table).upsert(payload, { onConflict: 'id' })
+    if (!error) return
+    const col = /Could not find the '([^']+)' column/i.exec(error.message)?.[1] ?? /column [\w.]*?\.?(\w+) does not exist/i.exec(error.message)?.[1]
+    if (col && !skip?.has(col)) {
+      noteMissingColumn(table, col)
+      continue
+    }
+    throw error
+  }
+}
+
 async function push(userId: string) {
   const sb = supabase!
+  // Each table on its own: a problem with one mustn't stop the others syncing.
+  let firstError: unknown = null
   for (const t of SYNC_TABLES) {
-    const rows = (await db.table(t).where('dirty').equals(1).toArray()) as Row[]
-    for (let i = 0; i < rows.length; i += 200) {
-      const chunk = rows.slice(i, i + 200)
-      const { error } = await sb.from(REMOTE[t]).upsert(chunk.map((r) => toRemote(t, r)), { onConflict: 'id' })
-      if (error) throw error
-      await db.transaction('rw', db.table(t), async () => {
-        markSyncTransaction()
-        for (const r of chunk) {
-          const cur = (await db.table(t).get(r.id as string)) as Row | undefined
-          // Only clear if nothing changed while the request was in flight.
-          if (cur && cur.updatedAt === r.updatedAt) await db.table(t).update(r.id as string, { dirty: 0 })
-        }
-      })
+    try {
+      const rows = (await db.table(t).where('dirty').equals(1).toArray()) as Row[]
+      for (let i = 0; i < rows.length; i += 200) {
+        const chunk = rows.slice(i, i + 200)
+        await upsertRows(REMOTE[t], chunk.map((r) => toRemote(t, r)))
+        await db.transaction('rw', db.table(t), async () => {
+          markSyncTransaction()
+          for (const r of chunk) {
+            const cur = (await db.table(t).get(r.id as string)) as Row | undefined
+            // Only clear if nothing changed while the request was in flight.
+            if (cur && cur.updatedAt === r.updatedAt) await db.table(t).update(r.id as string, { dirty: 0 })
+          }
+        })
+      }
+    } catch (e) {
+      console.warn(`sync: pushing ${t} failed`, e)
+      firstError ??= e
     }
   }
+  if (firstError) throw firstError
 
   const tombs = readTombstones()
   if (tombs.length) {
