@@ -1,0 +1,8 @@
+node_modules
+dist
+dev-dist
+public/pdfjs
+*.local
+.DS_Store
+.vercel
+.env.local

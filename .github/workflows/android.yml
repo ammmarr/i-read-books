@@ -1,0 +1,67 @@
+name: Android APK
+
+# Builds a signed APK on every push to main and publishes it as the
+# "latest" release — open that release on your tablet to install/update.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Build signed release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon \
+            -PversionCode=${{ github.run_number }} \
+            -PversionName=1.0.${{ github.run_number }}
+
+      - name: Collect APK
+        run: cp android/app/build/outputs/apk/release/app-release.apk I-Read-Books.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: I-Read-Books-apk
+          path: I-Read-Books.apk
+
+      - name: Publish "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest I-Read-Books.apk \
+            --title "I Read Books 1.0.${{ github.run_number }}" \
+            --notes "Download **I-Read-Books.apk** on your Android tablet and open it to install or update. Built from ${GITHUB_SHA::7}." \
+            --latest

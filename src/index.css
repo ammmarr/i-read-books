@@ -1,0 +1,295 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/geist-mono';
+@import './styles/textlayer.css';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ───────────────────────── Geist design tokens ─────────────────────────
+   Names match the design system doc exactly: `--color-ink` is literally
+   that variable. Tailwind utilities (`bg-canvas`, `text-ink`, `border-hairline`…)
+   resolve to these, so the `.dark` overrides below re-theme everything. */
+@theme {
+  --color-ink: #171717;
+  --color-canvas: #fafafa;
+  --color-canvas-elevated: #ffffff;
+  --color-hairline-soft: #f2f2f2;
+  --color-body: #4d4d4d;
+  --color-mute: #8f8f8f;
+  --color-faint: #a1a1a1;
+  --color-hairline: #ebebeb;
+  --color-link: #0070f3;
+  --color-link-deep: #0761d1;
+  --color-link-soft: #d3e5ff;
+  --color-violet: #7928ca;
+  --color-cyan: #50e3c2;
+  --color-pink: #ff0080;
+  --color-magenta: #eb367f;
+  --color-error: #ee0000;
+  --color-error-deep: #c50000;
+  --color-warning: #f5a623;
+  --color-success: #0a9960;
+
+  /* Sequential blue ramp for magnitude (heatmap). Step 0 = "nothing". */
+  --color-seq-0: #f2f2f2;
+  --color-seq-1: #cde2fb;
+  --color-seq-2: #86b6ef;
+  --color-seq-3: #3987e5;
+  --color-seq-4: #1c5cab;
+
+  --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+  --font-heading: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --radius-none: 0px;
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 100px;
+  --radius-full: 9999px;
+
+  --shadow-whisper: 0 1px 1px rgba(0, 0, 0, 0.04);
+  --shadow-floating: 0 0 0 1px rgba(0, 0, 0, 0.02), 0 2px 4px rgba(0, 0, 0, 0.04),
+    0 8px 16px -4px rgba(0, 0, 0, 0.08), 0 24px 32px -8px rgba(0, 0, 0, 0.08);
+  --shadow-cover: 0 1px 2px rgba(0, 0, 0, 0.06), 0 6px 16px -6px rgba(0, 0, 0, 0.18);
+  --shadow-cover-lift: 0 2px 4px rgba(0, 0, 0, 0.06), 0 18px 36px -12px rgba(0, 0, 0, 0.3);
+
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  @keyframes shimmer {
+    from { background-position: -200% 0; }
+    to { background-position: 200% 0; }
+  }
+}
+
+.dark {
+  --color-ink: #ededed;
+  --color-canvas: #0a0a0a;
+  --color-canvas-elevated: #141414;
+  --color-hairline-soft: #1f1f1f;
+  --color-body: #b4b4b4;
+  --color-mute: #8f8f8f;
+  --color-faint: #707070;
+  --color-hairline: #2e2e2e;
+  --color-link: #3291ff;
+  --color-link-deep: #0070f3;
+  --color-link-soft: #0f2d52;
+  --color-violet: #8a63d2;
+  --color-error: #ff4d4d;
+  --color-error-deep: #e00000;
+  --color-success: #3dd68c;
+
+  --color-seq-0: #1f1f1f;
+  --color-seq-1: #104281;
+  --color-seq-2: #1c5cab;
+  --color-seq-3: #3987e5;
+  --color-seq-4: #9ec5f4;
+
+  --shadow-whisper: 0 1px 1px rgba(0, 0, 0, 0.4);
+  --shadow-floating: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 16px -4px rgba(0, 0, 0, 0.5),
+    0 24px 40px -8px rgba(0, 0, 0, 0.6);
+  --shadow-cover: 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px -6px rgba(0, 0, 0, 0.7);
+  --shadow-cover-lift: 0 2px 4px rgba(0, 0, 0, 0.5), 0 18px 36px -12px rgba(0, 0, 0, 0.9);
+  color-scheme: dark;
+}
+
+/* ───────────────────────── Type scale ───────────────────────── */
+@utility text-display-xl { font-size: 48px; font-weight: 600; line-height: 48px; letter-spacing: -2.4px; }
+@utility text-heading-lg { font-size: 32px; font-weight: 600; line-height: 40px; letter-spacing: -1.28px; }
+@utility text-heading-md { font-size: 20px; font-weight: 600; line-height: 28px; letter-spacing: -0.4px; }
+@utility text-label-sm { font-size: 14px; font-weight: 500; line-height: 20px; letter-spacing: -0.28px; }
+@utility text-mono-eyebrow {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 500; line-height: 16px;
+  text-transform: uppercase; letter-spacing: 0.02em;
+}
+@utility text-body-lg { font-size: 16px; font-weight: 400; line-height: 24px; }
+@utility text-body-md { font-size: 14px; font-weight: 400; line-height: 20px; }
+@utility text-body-sm { font-size: 12px; font-weight: 400; line-height: 16px; }
+@utility text-code { font-family: var(--font-mono); font-size: 14px; font-weight: 400; line-height: 20px; }
+
+/* ───────────────────────── Base ───────────────────────── */
+html, body, #root { height: 100%; }
+
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: 'ss01', 'cv11';
+  overscroll-behavior: none;
+  /* never a sideways page scroll; `clip` (unlike hidden) keeps sticky headers working */
+  overflow-x: clip;
+  transition: background-color 200ms var(--ease-out-quart);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-link);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::selection { background: color-mix(in srgb, var(--color-link) 22%, transparent); }
+
+button, [role='button'], a { -webkit-user-select: none; user-select: none; }
+
+/* Hairline scrollbars that match the chrome. */
+* { scrollbar-width: thin; scrollbar-color: var(--color-hairline) transparent; }
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-hairline-soft) 0%,
+    color-mix(in srgb, var(--color-hairline) 70%, var(--color-hairline-soft)) 50%,
+    var(--color-hairline-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.safe-top { padding-top: var(--safe-area-inset-top,env(safe-area-inset-top)); }
+.safe-bottom { padding-bottom: var(--safe-area-inset-bottom,env(safe-area-inset-bottom)); }
+
+/* Circular reveal for theme switches (View Transitions API). */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+/* ───────────────────────── Reader ───────────────────────── */
+.reader-scroll {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pdf-page {
+  --hl-yellow: rgb(253 224 71 / 0.55);
+  --hl-green: rgb(134 239 172 / 0.6);
+  --hl-blue: rgb(147 197 253 / 0.6);
+  --hl-pink: rgb(249 168 212 / 0.6);
+  --hl-purple: rgb(196 181 253 / 0.65);
+  background: #fff;
+  contain: layout paint;
+}
+
+.pdf-page canvas { display: block; width: 100%; height: 100%; }
+
+.page-theme-sepia .pdf-page { background: #f6efdf; }
+.page-theme-sepia .pdf-page canvas { filter: sepia(0.35) saturate(1.1) brightness(0.97); }
+
+.page-theme-night .pdf-page { background: #1b1b1b; }
+.page-theme-night .pdf-page canvas { filter: invert(0.9) hue-rotate(180deg) contrast(0.95); }
+
+.hl-layer { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; }
+.page-theme-night .hl-layer { mix-blend-mode: screen; }
+.page-theme-night .pdf-page {
+  --hl-yellow: rgb(202 170 20 / 0.45);
+  --hl-green: rgb(40 170 90 / 0.45);
+  --hl-blue: rgb(50 120 230 / 0.5);
+  --hl-pink: rgb(220 60 140 / 0.45);
+  --hl-purple: rgb(140 100 230 / 0.5);
+}
+
+.hl-rect {
+  position: absolute;
+  border-radius: 2px;
+  transform-origin: left center;
+}
+.hl-rect.is-new { animation: hl-sweep 420ms var(--ease-out-expo) both; }
+@keyframes hl-sweep { from { transform: scaleX(0); opacity: 0.2; } to { transform: scaleX(1); opacity: 1; } }
+
+.search-hit {
+  position: absolute;
+  border-radius: 2px;
+  background: rgb(255 170 0 / 0.35);
+}
+.search-hit.is-current {
+  background: rgb(255 140 0 / 0.55);
+  box-shadow: 0 0 0 2px rgb(255 140 0 / 0.9);
+  animation: hit-pulse 900ms var(--ease-out-quart) 1;
+}
+@keyframes hit-pulse {
+  0% { box-shadow: 0 0 0 10px rgb(255 140 0 / 0); }
+  40% { box-shadow: 0 0 0 4px rgb(255 140 0 / 0.5); }
+  100% { box-shadow: 0 0 0 2px rgb(255 140 0 / 0.9); }
+}
+
+/* Text layer selection tint that reads on both paper and night pages. */
+.textLayer ::selection { background: rgb(0 112 243 / 0.28); }
+
+/* Range input styled as a hairline scrubber. */
+.scrubber {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+  --fill: 0%;
+}
+.scrubber::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--color-ink) var(--fill), var(--color-hairline) var(--fill));
+}
+.scrubber::-moz-range-track { height: 4px; border-radius: 9999px; background: var(--color-hairline); }
+.scrubber::-moz-range-progress { height: 4px; border-radius: 9999px; background: var(--color-ink); }
+.scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px; margin-top: -7px;
+  border-radius: 9999px;
+  background: var(--color-canvas-elevated);
+  border: 1px solid var(--color-hairline);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 150ms var(--ease-out-quart);
+}
+.scrubber:active::-webkit-slider-thumb { transform: scale(1.25); }
+.scrubber::-moz-range-thumb {
+  width: 18px; height: 18px; border-radius: 9999px;
+  background: var(--color-canvas-elevated);
+  border: 1px solid var(--color-hairline);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Heatmap cells pop in column by column. */
+.heat-cell {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: heat-in 520ms var(--ease-out-expo) both;
+  transition: stroke 120ms;
+}
+.heat-cell:hover { stroke: var(--color-ink); stroke-width: 1.5px; }
+@keyframes heat-in { from { opacity: 0; transform: scale(0.3); } }
+
+/* PDF link hotspots: invisible until hovered, a soft ink wash on press. */
+.pdf-link {
+  position: absolute;
+  pointer-events: auto;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: background-color 150ms, box-shadow 150ms;
+}
+@media (hover: hover) {
+  .pdf-link:hover { background: rgb(0 112 243 / 0.1); box-shadow: 0 0 0 1px rgb(0 112 243 / 0.35); }
+}
+.pdf-link:active { background: rgb(0 112 243 / 0.18); }
+.pdf-link.is-external:hover { cursor: alias; }
