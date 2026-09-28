@@ -50,6 +50,7 @@ export default function Reader() {
   const [error, setError] = useState<string | null>(null)
   const [download, setDownload] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [detail, setDetail] = useState<string | null>(null)
   const hasPdf = book ? book.pageCount > 0 : undefined
 
   useEffect(() => {
@@ -77,7 +78,16 @@ export default function Reader() {
         if (!alive) return
         setDownload(null)
         const m = (e as Error).message
-        setError(m === 'missing' ? 'missing' : m?.startsWith('download') || m === 'Failed to fetch' ? 'offline' : 'broken')
+        setDetail(`${(e as Error)?.name ?? 'Error'}: ${m ?? String(e)}`)
+        setError(
+          m === 'missing'
+            ? 'missing'
+            : m?.startsWith('download') || m === 'Failed to fetch'
+              ? 'offline'
+              : (e as Error)?.name === 'PasswordException'
+                ? 'password'
+                : 'broken',
+        )
       }
     })()
     return () => {
@@ -109,7 +119,30 @@ export default function Reader() {
     )
   if (error === 'offline')
     return <ReaderMessage title="Couldn’t download this book" body="Check your connection and try again." onBack={() => navigate('/')} action={{ label: 'Try again', onClick: () => setAttempt((a) => a + 1) }} book={book} />
-  if (error) return <ReaderMessage title="Can’t open this book" body="This PDF couldn’t be opened — it may be damaged or password-protected." onBack={() => navigate('/')} book={book} />
+  if (error === 'password')
+    return <ReaderMessage title="This PDF is password-protected" body="I READ BOOKS can’t open locked PDFs yet. Remove the password (e.g. print it to a new PDF) and add it again." onBack={() => navigate('/')} book={book} detail={detail} />
+  if (error)
+    return (
+      <ReaderMessage
+        title="Can’t open this book"
+        body={book?.filePath && getAuthSession() ? 'The copy on this device may be damaged. Download a fresh copy from your library.' : 'This PDF couldn’t be opened — the file may be damaged.'}
+        onBack={() => navigate('/')}
+        book={book}
+        detail={detail}
+        action={
+          book?.filePath && getAuthSession()
+            ? {
+                label: 'Download again',
+                onClick: async () => {
+                  await db.files.delete(book.id)
+                  setError(null)
+                  setAttempt((a) => a + 1)
+                },
+              }
+            : undefined
+        }
+      />
+    )
   if (!book || !doc) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} />
   return <ReaderView key={book.id} book={book} doc={doc} />
 }
@@ -147,13 +180,15 @@ function ReaderLoading({ book, onBack, progress }: { book?: Book; onBack: () => 
 }
 
 function ReaderMessage({
-  title, body, onBack, action, book,
+  title, body, onBack, action, book, detail,
 }: {
   title: string
   body: string
   onBack: () => void
   action?: { label: string; onClick: () => void }
   book?: Book
+  /** Technical reason, tucked away for troubleshooting. */
+  detail?: string | null
 }) {
   return (
     <div className="grid h-dvh place-items-center bg-canvas px-6 text-center">
@@ -165,6 +200,12 @@ function ReaderMessage({
         )}
         <h1 className="text-heading-md text-ink">{title}</h1>
         <p className="mt-2 text-body-md text-mute">{body}</p>
+        {detail && (
+          <details className="mt-3 max-w-full text-left">
+            <summary className="cursor-pointer text-center text-body-sm text-faint hover:text-mute">Technical details</summary>
+            <code className="mt-2 block break-all rounded-sm bg-hairline-soft px-2 py-1.5 text-[12px] text-body">{detail}</code>
+          </details>
+        )}
         <div className="mt-6 flex gap-2">
           <button onClick={onBack} className={`inline-flex h-9 items-center gap-2 rounded-sm px-4 text-sm font-medium ${action ? 'border border-hairline text-ink hover:bg-hairline-soft' : 'bg-ink text-canvas'}`}>
             <ArrowLeft className="size-4" /> Library
