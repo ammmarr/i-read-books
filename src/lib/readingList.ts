@@ -148,7 +148,7 @@ export async function enrichFromOpenLibrary() {
     const todo = await db.books.filter((b) => b.pageCount === 0 && !b.enriched && !b.coverUrl && !b.cover).toArray()
     for (const b of todo) {
       try {
-        const q = new URLSearchParams({ title: b.title, limit: '1', fields: 'title,author_name,cover_i,number_of_pages_median' })
+        const q = new URLSearchParams({ title: b.title, limit: '1', fields: 'author_name,cover_i,number_of_pages_median' })
         if (b.author) q.set('author', b.author)
         let res = await fetch(`https://openlibrary.org/search.json?${q}`)
         let json = res.ok ? await res.json() : null
@@ -157,13 +157,11 @@ export async function enrichFromOpenLibrary() {
           res = await fetch(`https://openlibrary.org/search.json?${q}`)
           json = res.ok ? await res.json() : null
         }
-        const doc = json?.docs?.[0] as { title?: string; author_name?: string[]; cover_i?: number; number_of_pages_median?: number } | undefined
+        const doc = json?.docs?.[0] as { author_name?: string[]; cover_i?: number; number_of_pages_median?: number } | undefined
         const patch: Partial<Book> = {}
         if (doc?.cover_i) patch.coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`
         if (doc?.author_name?.[0] && !b.author) patch.author = doc.author_name[0]
         if (doc?.number_of_pages_median && !b.estPages) patch.estPages = doc.number_of_pages_median
-        // Adopt the catalogue's casing when it's clearly the same title.
-        if (doc?.title && titleKey(doc.title) === titleKey(b.title) && doc.title !== b.title) patch.title = doc.title
         if (Object.keys(patch).length) await db.books.update(b.id, patch)
       } catch {
         /* offline or rate-limited — try again another time */

@@ -38,7 +38,7 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - uses: android-actions/setup-android@v3
+      # The runner image ships the Android SDK (ANDROID_HOME) with licences accepted.
 
       - name: Build signed release APK
         working-directory: android
