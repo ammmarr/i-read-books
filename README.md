@@ -2,7 +2,8 @@
 
 A calm, private PDF reader for one person — PC and Android tablet.
 Everything (books, highlights, notes, reading history) is stored **on the device**
-in IndexedDB. There is no server and no account.
+first, so it's instant and works offline. Sign in to sync it across devices through
+your own Supabase project.
 
 ## Where it lives
 
