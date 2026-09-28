@@ -272,6 +272,19 @@ export async function setStatus(id: string, status: BookStatus) {
   await db.books.update(id, patch)
 }
 
+/** Set progress by hand: the first `pages` pages count as read, on every device. */
+export async function setPagesRead(id: string, pages: number) {
+  const book = await db.books.get(id)
+  if (!book) return
+  const n = Math.max(0, Math.min(book.pageCount, Math.round(pages)))
+  await db.books.update(id, {
+    readPages: n ? (n === 1 ? '0' : `0-${n - 1}`) : '',
+    furthestPage: Math.max(0, n - 1),
+    readPagesSetAt: Date.now(),
+    ...(book.status === 'finished' && n < book.pageCount ? { status: 'reading' as const, finishedAt: undefined } : {}),
+  })
+}
+
 export async function reorderQueue(ids: string[]) {
   await db.transaction('rw', db.books, async () => {
     await Promise.all(ids.map((id, i) => db.books.update(id, { queueOrder: i + 1 })))

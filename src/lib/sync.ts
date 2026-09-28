@@ -61,7 +61,7 @@ function toRemote(table: SyncTable, r: Row): Row {
       return {
         id: b.id, title: b.title, author: b.author, file_name: b.fileName, file_size: b.fileSize, fingerprint: b.fingerprint,
         page_count: b.pageCount, page_sizes: b.pageSizes, tint: n(b.tint), added_at: b.addedAt, last_opened_at: n(b.lastOpenedAt),
-        current_page: b.currentPage, page_offset: b.pageOffset, furthest_page: b.furthestPage, read_pages: n(b.readPages), status: b.status,
+        current_page: b.currentPage, page_offset: b.pageOffset, furthest_page: b.furthestPage, read_pages: n(b.readPages), read_pages_set_at: n(b.readPagesSetAt), status: b.status,
         queue_order: b.queueOrder, started_at: n(b.startedAt), finished_at: n(b.finishedAt), file_path: n(b.filePath),
         cover_path: n(b.coverPath), cover_url: n(b.coverUrl), source_url: n(b.sourceUrl), est_pages: n(b.estPages),
         updated_at: b.updatedAt ?? Date.now(), deleted: false,
@@ -101,7 +101,7 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
         id: r.id, title: r.title ?? '', author: r.author ?? '', fileName: r.file_name ?? '', fileSize: r.file_size ?? 0,
         fingerprint: r.fingerprint ?? '', pageCount: r.page_count ?? 0, pageSizes: r.page_sizes ?? [], tint: u(r.tint as string | null),
         addedAt: r.added_at ?? Date.now(), lastOpenedAt: u(r.last_opened_at as number | null), currentPage: r.current_page ?? 0,
-        pageOffset: r.page_offset ?? 0, furthestPage: r.furthest_page ?? 0, readPages: u(r.read_pages as string | null), status: r.status ?? 'queued',
+        pageOffset: r.page_offset ?? 0, furthestPage: r.furthest_page ?? 0, readPages: u(r.read_pages as string | null), readPagesSetAt: u(r.read_pages_set_at as number | null), status: r.status ?? 'queued',
         queueOrder: r.queue_order ?? 0, startedAt: u(r.started_at as number | null), finishedAt: u(r.finished_at as number | null),
         filePath: u(r.file_path as string | null), coverPath, coverUrl: u(r.cover_url as string | null),
         sourceUrl: u(r.source_url as string | null), estPages: u(r.est_pages as number | null),
@@ -163,9 +163,19 @@ async function pull(userId: string) {
           }
           if (local?.dirty && (local.updatedAt ?? 0) > (row.updated_at as number)) continue
           const next = fromRemote(t, row, local)
-          if (t === 'books' && local) {
+          const lb = local as unknown as Book | undefined
+          const rb = next as unknown as Book
+          if (t === 'books' && lb && (lb.readPagesSetAt ?? 0) > (rb.readPagesSetAt ?? 0)) {
+            // Progress was set by hand here, more recently than there: ours stands.
+            next.readPages = lb.readPages
+            next.readPagesSetAt = lb.readPagesSetAt
+            next.furthestPage = lb.furthestPage
+            next.dirty = 1
+            next.updatedAt = Date.now()
+          } else if (t === 'books' && lb && (lb.readPagesSetAt ?? 0) === (rb.readPagesSetAt ?? 0)) {
             // Pages read on two devices add up — a newer row mustn't erase
-            // what the other device read.
+            // what the other device read. (A newer *manual* set on the other
+            // side skips this and replaces ours.)
             const mine = readPagesOf(local as unknown as Book)
             const theirs = readPagesOf(next as unknown as Book)
             const union = new Set([...theirs, ...mine])

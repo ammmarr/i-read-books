@@ -556,13 +556,21 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     },
     [book.id],
   )
-  // Pages read on another device (sync) join ours.
+  // Pages read on another device (sync) join ours — unless progress was set
+  // by hand, which replaces it.
+  const setAtSeen = useRef(book.readPagesSetAt ?? 0)
   useEffect(() => {
     const theirs = readPagesOf(book)
+    if ((book.readPagesSetAt ?? 0) > setAtSeen.current) {
+      setAtSeen.current = book.readPagesSetAt ?? 0
+      readSet.current = theirs
+      setReadN(theirs.size)
+      return
+    }
     let grew = false
     for (const p of theirs) if (!readSet.current.has(p)) (readSet.current.add(p), (grew = true))
     if (grew) setReadN(readSet.current.size)
-  }, [book.readPages]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [book.readPages, book.readPagesSetAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollToPage = useCallback(
     (i: number, opts: { smooth?: boolean; frac?: number } = {}) => {

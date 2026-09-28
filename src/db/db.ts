@@ -39,6 +39,11 @@ export interface Book extends Synced {
   furthestPage: number
   /** Pages actually read (dwelled on), as compact ranges "0-12,15". Progress comes from this. */
   readPages?: string
+  /**
+   * When progress was set by hand (ms). A newer manual set replaces pages read
+   * on every device; otherwise devices merge (union) what each has read.
+   */
+  readPagesSetAt?: number
   status: BookStatus
   /** Sort key for the "Up next" queue. Lower = sooner. */
   queueOrder: number

@@ -36,6 +36,7 @@ create table if not exists public.irb_books (
   page_offset     double precision,
   furthest_page   int,
   read_pages      text,
+  read_pages_set_at bigint,
   status          text,
   queue_order     double precision,
   started_at      bigint,
@@ -98,6 +99,7 @@ create table if not exists public.irb_profiles (
 
 -- (for projects created before read_pages existed)
 alter table public.irb_books add column if not exists read_pages text;
+alter table public.irb_books add column if not exists read_pages_set_at bigint;
 
 -- ── triggers, indexes, row-level security (only you can see your rows)
 do $$
@@ -112,6 +114,24 @@ begin
     execute format('create policy "own rows" on public.%1$s for all to authenticated using (user_id = auth.uid()) with check (user_id = auth.uid())', t);
   end loop;
 end $$;
+
+-- ── progress set by hand wins over stale devices
+-- A device that hasn't synced a manual "Edit progress" yet can't overwrite it
+-- with its older pages-read; it adopts the new progress on its next pull.
+create or replace function public.irb_books_keep_manual_progress() returns trigger
+language plpgsql as $$
+begin
+  if old.read_pages_set_at is not null
+     and (new.read_pages_set_at is null or new.read_pages_set_at < old.read_pages_set_at) then
+    new.read_pages := old.read_pages;
+    new.read_pages_set_at := old.read_pages_set_at;
+    new.furthest_page := old.furthest_page;
+  end if;
+  return new;
+end $$;
+drop trigger if exists irb_books_manual_progress on public.irb_books;
+create trigger irb_books_manual_progress before update on public.irb_books
+  for each row execute function public.irb_books_keep_manual_progress();
 
 -- ── storage: one private bucket, one folder per user  ({user_id}/{book_id}.pdf|.jpg)
 insert into storage.buckets (id, name, public)

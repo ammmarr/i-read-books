@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
@@ -6,7 +6,7 @@ import { ArrowLeft, BookOpen, Copy, ExternalLink, FilePlus, Pencil, Trash2 } fro
 import { useImporter } from '../components/Importer'
 import { readCount } from '../lib/pages'
 import { db, type Highlight, type HighlightColor } from '../db/db'
-import { bookProgress, renameBook, setStatus } from '../db/books'
+import { bookProgress, renameBook, setPagesRead, setStatus } from '../db/books'
 import { PageContainer } from '../components/AppShell'
 import { BookCover } from '../components/BookCover'
 import { useBookActions } from '../components/BookActions'
@@ -30,6 +30,7 @@ export default function BookDetail() {
   const { remove } = useBookActions()
   const { attach } = useImporter()
   const [editing, setEditing] = useState(false)
+  const [editingProgress, setEditingProgress] = useState(false)
   const [color, setColor] = useState<HighlightColor | 'all'>('all')
 
   const own = useMemo(() => sessions.filter((s) => s.bookId === id), [sessions, id])
@@ -120,7 +121,12 @@ export default function BookDetail() {
 
           {book.pageCount > 0 && <div className="mt-6 max-w-md">
             <div className="mb-2 flex justify-between text-body-sm">
-              <span className="text-ink"><span className="font-medium">{Math.round(p * 100)}%</span> <span className="text-mute">· {readCount(book)} of {book.pageCount} pages read</span></span>
+              <span className="text-ink">
+                <span className="font-medium">{Math.round(p * 100)}%</span> <span className="text-mute">· {readCount(book)} of {book.pageCount} pages read</span>
+                <button onClick={() => setEditingProgress(true)} className="ml-2 text-link hover:underline">
+                  Edit
+                </button>
+              </span>
               {st.remainingSeconds ? <span className="text-mute">~{formatDurationLong(st.remainingSeconds)} left</span> : null}
             </div>
             <ProgressBar value={p} />
@@ -242,6 +248,7 @@ export default function BookDetail() {
         </Button>
       </div>
 
+      <EditProgress open={editingProgress} onClose={() => setEditingProgress(false)} read={readCount(book)} total={book.pageCount} onSave={(n) => setPagesRead(book.id, n)} />
       <EditBook open={editing} onClose={() => setEditing(false)} title={book.title} author={book.author} onSave={(t, a) => renameBook(book.id, t, a)} />
     </PageContainer>
   )
@@ -308,5 +315,64 @@ function Field({ label, value, onChange, autoFocus, placeholder }: { label: stri
         className="h-10 w-full rounded-sm border border-hairline bg-canvas-elevated px-3 text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-link focus:ring-3 focus:ring-link/15"
       />
     </label>
+  )
+}
+
+function EditProgress({ open, onClose, read, total, onSave }: { open: boolean; onClose: () => void; read: number; total: number; onSave: (n: number) => void }) {
+  const [n, setN] = useState(read)
+  useEffect(() => {
+    if (open) setN(read)
+  }, [open, read])
+  const pct = total ? Math.round((n / total) * 100) : 0
+  return (
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title="Edit progress"
+      description="Set how many pages you’ve read. It replaces the tracked progress on all your devices."
+      width={420}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={() => {
+              onSave(n)
+              onClose()
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      }
+    >
+      <div className="pt-2">
+        <div className="flex items-baseline justify-center gap-2">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={total}
+            value={n}
+            onChange={(e) => setN(Math.max(0, Math.min(total, parseInt(e.target.value || '0', 10))))}
+            aria-label="Pages read"
+            className="w-24 rounded-sm border border-hairline bg-canvas-elevated py-1 text-center text-[32px] font-semibold tabular text-ink outline-none focus:border-link focus:ring-3 focus:ring-link/15"
+          />
+          <span className="text-body-md text-mute">of {total} pages · {pct}%</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={total}
+          value={n}
+          onChange={(e) => setN(Number(e.target.value))}
+          aria-label="Pages read"
+          className="scrubber mt-5"
+          style={{ '--fill': `${total ? (n / total) * 100 : 0}%` } as React.CSSProperties}
+        />
+        <p className="mt-3 text-body-sm text-faint">Counts pages 1–{Math.max(1, n)} as read. Reading from here on keeps adding to it as usual.</p>
+      </div>
+    </Sheet>
   )
 }

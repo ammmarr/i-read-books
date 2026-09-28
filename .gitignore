@@ -9,3 +9,4 @@ public/pdfjs
 
 .vercel
 supabase/seed_reading_list.sql
+supabase/set_*.sql
