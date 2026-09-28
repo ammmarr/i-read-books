@@ -4,6 +4,12 @@ A calm, private PDF reader for one person — PC and Android tablet.
 Everything (books, highlights, notes, reading history) is stored **on the device**
 in IndexedDB. There is no server and no account.
 
+## Where it lives
+
+- **Web app:** https://i-read-books-teal.vercel.app (installable PWA; redeploys on every push to `main`)
+- **Android APK:** [Releases → latest](https://github.com/ammmarr/i-read-books/releases/tag/latest), rebuilt and signed on every push by `.github/workflows/android.yml`
+- **Cloud sync:** Supabase project `lergfyeolzrudfaplurk` — schema in `supabase/schema.sql`
+
 ## Features
 
 - **Library** — drag PDFs anywhere onto the window (or tap *Add book*). Covers,
@@ -29,6 +35,15 @@ in IndexedDB. There is no server and no account.
 - **Daily goal** with a progress ring and a celebration when you hit it.
 - Light / dark / system theme with a circular reveal transition.
 - Backup & restore (highlights, notes, progress, history) as a JSON file.
+- **Cloud sync (Supabase)** — sign in on each device; library, reading list, progress,
+  highlights, notes, bookmarks and reading time sync; PDFs and covers live in private
+  storage and download on first open. Works offline and catches up later.
+- **Reading-list import** — Notion or Goodreads CSV → books without a PDF (covers and
+  page counts from Open Library). Adding a matching PDF later fills the entry in.
+- **PDF links** — tap a contents link to jump to the chapter (with a “Back to page N”
+  pill); web links open in the browser.
+- **Android app** — open PDFs from Files/Drive/WhatsApp with *Open with → I Read
+  Books*, back button closes panels first, immersive full screen, screen stays on.
 
 Press `?` in the reader for all keyboard shortcuts.
 
@@ -62,3 +77,15 @@ Each device keeps its own library. To move highlights between devices, use
 
 React 19 · TypeScript · Vite · Tailwind v4 (Geist design tokens in
 `src/index.css`) · pdf.js · Dexie (IndexedDB) · Motion · vite-plugin-pwa.
+
+## Cloud setup (one time)
+
+1. Supabase → SQL Editor → run `supabase/schema.sql`.
+2. Supabase → Authentication → URL Configuration → set **Site URL** to the web app URL
+   (or turn off *Confirm email* under Providers → Email for a personal app).
+3. `.env` holds the project URL and **publishable** key. Never put a secret /
+   service_role key in this app — it would ship to every browser.
+
+The Android signing key is `android/keystore/release.p12` (password in
+`android/keystore.properties`). Keep this repo private; if it ever goes public, move
+both into GitHub Actions secrets first.

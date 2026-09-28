@@ -6,3 +6,5 @@ public/pdfjs
 .DS_Store
 .vercel
 .env.local
+
+.vercel
