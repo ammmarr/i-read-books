@@ -1,7 +1,7 @@
-android
-assets
+/android
+/assets
 node_modules
-dist
-dev-dist
-public/pdfjs
-.github
+/dist
+/dev-dist
+/public/pdfjs
+/.github
