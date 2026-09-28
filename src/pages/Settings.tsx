@@ -204,7 +204,9 @@ export default function SettingsPage() {
         </p>
       </Group>
 
-      <p className="mt-10 text-center text-body-sm text-faint">I READ BOOKS · made for one reader</p>
+      <p className="mt-10 text-center text-body-sm text-faint">
+        I READ BOOKS · version {__APP_VERSION__} · made for one reader
+      </p>
     </PageContainer>
   )
 }

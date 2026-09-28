@@ -5,8 +5,14 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // Relative base so the build works from any static host sub-path
 // (GitHub Pages, Netlify, a Capacitor WebView, …).
+// Shown in Settings so you can tell which build you're running.
+// CI sets APP_VERSION (matches the APK); Vercel builds fall back to the commit.
+const appVersion =
+  process.env.APP_VERSION ?? (process.env.VERCEL_GIT_COMMIT_SHA ? `web ${process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)}` : 'dev')
+
 export default defineConfig({
   base: './',
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   plugins: [
     react(),
     tailwindcss(),

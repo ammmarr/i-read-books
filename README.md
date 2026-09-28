@@ -8,7 +8,7 @@ your own Supabase project.
 ## Where it lives
 
 - **Web app:** https://i-read-books-teal.vercel.app (installable PWA; redeploys on every push to `main`)
-- **Android APK:** [Releases → latest](https://github.com/ammmarr/i-read-books/releases/tag/latest), rebuilt and signed on every push by `.github/workflows/android.yml`
+- **Android APK:** direct download https://github.com/ammmarr/i-read-books/releases/latest/download/I-Read-Books.apk (or [Releases → latest](https://github.com/ammmarr/i-read-books/releases/tag/latest)), rebuilt and signed on every push by `.github/workflows/android.yml`. The version is shown at the bottom of Settings.
 - **Cloud sync:** Supabase project `lergfyeolzrudfaplurk` — schema in `supabase/schema.sql`
 
 ## Features
