@@ -31,7 +31,7 @@ export async function shareTextFile(name: string, text: string, title: string) {
 
 /**
  * Android integration: hardware back closes the top-most panel before
- * navigating, and PDFs opened from other apps ("Open with I Read Books")
+ * navigating, and PDFs opened from other apps ("Open with I read")
  * are handed to the importer.
  */
 export async function initNative() {

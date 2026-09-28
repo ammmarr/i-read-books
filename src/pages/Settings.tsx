@@ -109,9 +109,9 @@ export default function SettingsPage() {
       </Group>
 
       {(available || !isStandalone()) && (
-        <Group title="Install" desc="Install I READ BOOKS to open it like a normal app — full screen, from your home screen or taskbar, and fully offline.">
+        <Group title="Install" desc="Install I read to open it like a normal app — full screen, from your home screen or taskbar, and fully offline.">
           {available ? (
-            <Button onClick={async () => (await install()) && toast({ message: 'Installed', description: 'Find I READ BOOKS on your home screen.' })}>
+            <Button onClick={async () => (await install()) && toast({ message: 'Installed', description: 'Find I read on your home screen.' })}>
               <MonitorSmartphone className="size-4" /> Install app
             </Button>
           ) : (
@@ -205,7 +205,7 @@ export default function SettingsPage() {
       </Group>
 
       <p className="mt-10 text-center text-body-sm text-faint">
-        I READ BOOKS · version {__APP_VERSION__} · made for one reader
+        I read · version {__APP_VERSION__} · made for one reader
       </p>
     </PageContainer>
   )

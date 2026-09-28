@@ -29,7 +29,7 @@ export async function exportBackup() {
     })(),
   }
   const name = `i-read-books-backup-${new Date().toISOString().slice(0, 10)}.json`
-  if (isNative) return shareTextFile(name, JSON.stringify(data), 'I READ BOOKS backup')
+  if (isNative) return shareTextFile(name, JSON.stringify(data), 'I read backup')
   const blob = new Blob([JSON.stringify(data)], { type: 'application/json' })
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
@@ -44,7 +44,7 @@ export async function exportBackup() {
  */
 export async function importBackup(file: File) {
   const data = JSON.parse(await file.text()) as BackupFile
-  if (data.app !== 'i-read-books') throw new Error('Not an I READ BOOKS backup')
+  if (data.app !== 'i-read-books') throw new Error('Not an I read backup')
   const local = await db.books.toArray()
   const byPrint = new Map(local.map((b) => [b.fingerprint, b]))
   const idMap = new Map<string, string>()

@@ -19,10 +19,10 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,
-      includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
+      includeAssets: ['favicon.png', 'apple-touch-icon-180x180.png'],
       manifest: {
-        name: 'I READ BOOKS',
-        short_name: 'I Read Books',
+        name: 'I read',
+        short_name: 'I read',
         description: 'A calm, private PDF reader with highlights and reading analytics.',
         theme_color: '#fafafa',
         background_color: '#fafafa',

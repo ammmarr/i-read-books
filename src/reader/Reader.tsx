@@ -120,7 +120,7 @@ export default function Reader() {
   if (error === 'offline')
     return <ReaderMessage title="Couldn’t download this book" body="Check your connection and try again." onBack={() => navigate('/')} action={{ label: 'Try again', onClick: () => setAttempt((a) => a + 1) }} book={book} />
   if (error === 'password')
-    return <ReaderMessage title="This PDF is password-protected" body="I READ BOOKS can’t open locked PDFs yet. Remove the password (e.g. print it to a new PDF) and add it again." onBack={() => navigate('/')} book={book} detail={detail} />
+    return <ReaderMessage title="This PDF is password-protected" body="I read can’t open locked PDFs yet. Remove the password (e.g. print it to a new PDF) and add it again." onBack={() => navigate('/')} book={book} detail={detail} />
   if (error)
     return (
       <ReaderMessage

@@ -57,10 +57,15 @@ export function Welcome() {
         >
           <div className="mx-auto grid min-h-full max-w-[1080px] items-center gap-10 px-5 pb-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+24px)] pt-[calc(var(--safe-area-inset-top,env(safe-area-inset-top))+32px)] md:grid-cols-[1fr_440px] md:gap-16 md:px-10">
             <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
-              <div className="flex items-center gap-3">
-                <Logo className="size-10" />
-                <span className="text-[17px] font-semibold tracking-[-0.3px] text-ink">I READ BOOKS</span>
-              </div>
+              <motion.div
+                initial={{ opacity: 0, y: 12, rotate: -2 }}
+                animate={{ opacity: 1, y: 0, rotate: 0 }}
+                transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                className="text-ink"
+              >
+                <Logo className="h-28 md:h-36" title="I read" />
+              </motion.div>
+              <div className="mt-4 text-[22px] font-semibold tracking-[-0.6px] text-ink">I read</div>
               <h1 className="mt-8 text-[34px] font-semibold leading-[40px] tracking-[-1.4px] text-ink md:text-display-xl">
                 A quiet place
                 <br />

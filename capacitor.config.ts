@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli'
 
 const config: CapacitorConfig = {
   appId: 'app.ireadbooks.reader',
-  appName: 'I Read Books',
+  appName: 'I read',
   webDir: 'dist',
   backgroundColor: '#0a0a0a',
   android: {

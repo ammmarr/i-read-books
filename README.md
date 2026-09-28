@@ -1,4 +1,4 @@
-# I READ BOOKS
+# I read
 
 A calm, private PDF reader for one person — PC and Android tablet.
 Everything (books, highlights, notes, reading history) is stored **on the device**

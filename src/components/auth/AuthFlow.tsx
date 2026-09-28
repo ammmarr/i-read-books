@@ -244,7 +244,7 @@ export function AuthFlow({ initial = 'signup', onSignedIn }: Props) {
 
             {mode !== 'forgot' && (
               <p className="mt-5 text-center text-body-md text-mute">
-                {mode === 'signup' ? 'Already have an account?' : 'New to I READ BOOKS?'}{' '}
+                {mode === 'signup' ? 'Already have an account?' : 'New to I read?'}{' '}
                 <button type="button" onClick={() => go(mode === 'signup' ? 'signin' : 'signup')} className="font-medium text-ink underline-offset-4 hover:underline">
                   {mode === 'signup' ? 'Sign in' : 'Create an account'}
                 </button>

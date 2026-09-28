@@ -64,6 +64,6 @@ jobs:
         run: |
           gh release delete latest --yes --cleanup-tag || true
           gh release create latest I-Read-Books.apk \
-            --title "I Read Books 1.0.${{ github.run_number }}" \
+            --title "I read 1.0.${{ github.run_number }}" \
             --notes "Download **I-Read-Books.apk** on your Android tablet and open it to install or update. Built from ${GITHUB_SHA::7}." \
             --latest
