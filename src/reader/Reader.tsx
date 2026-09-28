@@ -25,6 +25,7 @@ import { ReaderSettings } from './ReaderSettings'
 import { SearchPanel } from './SearchPanel'
 import { useReadingSession } from './useReadingSession'
 import { useImporter } from '../components/Importer'
+import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { downloadBookFile } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
 import { isNative, keepScreenOn, setImmersive } from '../lib/native'
@@ -407,7 +408,6 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const lockRef = useRef(lockChrome)
   lockRef.current = lockChrome || !settings.autoHideChrome
 
-  const furthest = useRef(book.furthestPage)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const persist = useCallback(() => {
     const el = scroller.current
@@ -415,8 +415,8 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     const L = layoutRef.current
     const cp = pageAt(el.scrollTop + el.clientHeight * 0.4)
     const offset = (el.scrollTop + 16 - L.tops[cp]) / L.heights[cp]
-    furthest.current = Math.max(furthest.current, cp)
-    db.books.update(book.id, { currentPage: cp, pageOffset: offset, furthestPage: furthest.current, lastOpenedAt: Date.now() })
+    // Where you are, not how far you've read — progress comes from pages read.
+    db.books.update(book.id, { currentPage: cp, pageOffset: offset, lastOpenedAt: Date.now() })
   }, [book.id, pageAt])
 
   const onScroll = useCallback(() => {
@@ -459,18 +459,69 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     if (lockChrome) setChrome(true)
   }, [lockChrome])
 
-  // Reached the last page → offer to mark as finished (once per visit).
+  // ── Pages actually read ───────────────────────────────────────────────
+  // A page counts once it's been the current page for a slice of its expected
+  // reading time. Jumping to page 200, scrubbing or flicking past pages
+  // doesn't count, so progress reflects reading, not browsing.
+  const readSet = useRef<Set<number>>(readPagesOf(book))
+  const [readN, setReadN] = useState(() => readSet.current.size)
+  const dwellCache = useRef(new Map<number, number>())
+  const dwellFor = useCallback(
+    (page: number) => {
+      const hit = dwellCache.current.get(page)
+      if (hit != null) return hit
+      const idx = text.peekIndex(page)
+      if (idx) {
+        const d = dwellFor_(idx.norm.length)
+        dwellCache.current.set(page, d)
+        return d
+      }
+      void text.getIndex(page).then((i) => dwellCache.current.set(page, dwellFor_(i.norm.length)))
+      return dwellFor_(undefined)
+    },
+    [text],
+  )
+  const readSaveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const finishOffered = useRef(book.status === 'finished')
+  const onPageRead = useCallback(
+    (page: number) => {
+      if (readSet.current.has(page)) return
+      readSet.current.add(page)
+      setReadN(readSet.current.size)
+      clearTimeout(readSaveTimer.current)
+      readSaveTimer.current = setTimeout(() => {
+        const set = readSet.current
+        db.books.update(book.id, { readPages: formatPages(set), furthestPage: Math.max(0, ...set) })
+      }, 1500)
+      // Finishing the last page after reading most of the book → offer "Finished".
+      if (!finishOffered.current && page === book.pageCount - 1 && book.pageCount > 1 && readSet.current.size / book.pageCount >= 0.75) {
+        finishOffered.current = true
+        toast({
+          message: 'You reached the end',
+          description: `Mark “${book.title}” as finished?`,
+          action: { label: 'Finished', onClick: () => setStatus(book.id, 'finished') },
+          duration: 10000,
+        })
+      }
+    },
+    [book.id, book.pageCount, book.title, toast],
+  )
+  useEffect(
+    () => () => {
+      // Flush on leave.
+      clearTimeout(readSaveTimer.current)
+      const set = readSet.current
+      if (set.size) db.books.update(book.id, { readPages: formatPages(set), furthestPage: Math.max(0, ...set) })
+    },
+    [book.id],
+  )
+  // Pages read on another device (sync) join ours.
   useEffect(() => {
-    if (finishOffered.current || currentPage < book.pageCount - 1 || book.pageCount < 2) return
-    finishOffered.current = true
-    toast({
-      message: 'You reached the end',
-      description: `Mark “${book.title}” as finished?`,
-      action: { label: 'Finished', onClick: () => setStatus(book.id, 'finished') },
-      duration: 10000,
-    })
-  }, [currentPage, book, toast])
+    const theirs = readPagesOf(book)
+    let grew = false
+    for (const p of theirs) if (!readSet.current.has(p)) (readSet.current.add(p), (grew = true))
+    if (grew) setReadN(readSet.current.size)
+  }, [book.readPages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const scrollToPage = useCallback(
     (i: number, opts: { smooth?: boolean; frac?: number } = {}) => {
@@ -489,6 +540,8 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     bookId: book.id,
     currentPage,
     enabled: true,
+    dwellFor,
+    onPageRead,
     goalSeconds: settings.dailyGoalMinutes * 60,
     onGoalReached: () => {
       vibrate(20)
@@ -1150,7 +1203,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
               <IconButton label="Next page (→)" size="icon-sm" onClick={() => scrollToPage(currentPage + 1, { smooth: true })} disabled={currentPage >= book.pageCount - 1}>
                 <ChevronRight className="size-4" />
               </IconButton>
-              <GoToPage page={currentPage} count={book.pageCount} onGo={(p) => scrollToPage(p)} progress={progress} />
+              <GoToPage page={currentPage} count={book.pageCount} onGo={(p) => scrollToPage(p)} progress={readN / Math.max(1, book.pageCount)} />
               {!mobile && (
                 <div className="ml-1 flex items-center rounded-full border border-hairline">
                   <IconButton label="Zoom out (Ctrl −)" size="icon-sm" onClick={() => stepZoom(-1)}>
@@ -1371,7 +1424,7 @@ function GoToPage({ page, count, onGo, progress }: { page: number; count: number
         {page + 1}
         <span className="text-mute"> / {count}</span>
       </span>
-      <span className="text-[11px] tabular text-faint">{Math.round(progress * 100)}%</span>
+      <span className="text-[11px] tabular text-faint" title="Pages you’ve actually read — skimming doesn’t count">{Math.round(progress * 100)}% read</span>
     </button>
   )
 }

@@ -10,6 +10,7 @@ import Stats from './pages/Stats'
 import SettingsPage from './pages/Settings'
 import BookDetail from './pages/BookDetail'
 import Reader from './reader/Reader'
+import { AuthNotices, PasswordRecovery, Welcome } from './components/auth/Welcome'
 
 const routes: RouteObject[] = [
   {
@@ -54,6 +55,9 @@ export default function App() {
         <ToastProvider>
           <ImportProvider>
             <AnimatedRoutes />
+            <Welcome />
+            <AuthNotices />
+            <PasswordRecovery />
           </ImportProvider>
         </ToastProvider>
       </HashRouter>

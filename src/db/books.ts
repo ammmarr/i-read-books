@@ -1,5 +1,6 @@
-import { db, uid, type Book, type BookStatus, type Bookmark, type Highlight, type Session, type BookFile } from './db'
+import { db, uid, type Book, type BookStatus, type Bookmark, type Highlight, type Session, type BookFile, type PageSize } from './db'
 import { closePdf, getPageSizes, openPdf, readMetadata, renderCover } from '../lib/pdf'
+import { readCount } from '../lib/pages'
 
 export class DuplicateBookError extends Error {
   book: Book
@@ -33,6 +34,7 @@ export function titleKey(t: string) {
     .replace(/\.pdf$/, '')
     .replace(/\(.*?\)|\[.*?\]/g, ' ')
     .replace(/^(the|a|an)\s+/, '')
+    .replace(/['’]/g, '')
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
 }
@@ -53,70 +55,165 @@ export interface ImportResult {
   attached: boolean
 }
 
-export async function importPdf(file: File, { attachTo }: { attachTo?: string } = {}): Promise<ImportResult> {
+/** Everything read from a PDF before it's added — shown for review in "Add book". */
+export interface PdfAnalysis {
+  file: File
+  bytes: Uint8Array
+  fingerprint: string
+  title: string
+  author: string
+  pageCount: number
+  pageSizes: PageSize[]
+  cover?: Blob
+  tint: string
+  /** Same file is already in the library. */
+  duplicate?: Book
+  /** A reading-list entry (no PDF yet) this file looks like. */
+  match?: Book
+}
+
+export async function analyzePdf(file: File): Promise<PdfAnalysis> {
   const bytes = new Uint8Array(await file.arrayBuffer())
   // pdf.js transfers the buffer to its worker, so hand it a copy.
   const doc = await openPdf(bytes.slice())
   try {
     const fingerprint = doc.fingerprints[0] ?? `${file.name}-${file.size}`
-    const existing = await db.books.where('fingerprint').equals(fingerprint).first()
-    if (existing) throw new DuplicateBookError(existing)
-
-    const [meta, pageSizes, cover] = await Promise.all([
+    const [duplicate, meta, pageSizes, cover] = await Promise.all([
+      db.books.where('fingerprint').equals(fingerprint).first(),
       readMetadata(doc),
       getPageSizes(doc),
       renderCover(doc).catch(() => ({ blob: undefined, tint: '#e5e5e5' })),
     ])
     const title = usableTitle(meta.title) ? meta.title : titleFromFileName(file.name)
-    const pdfFields = {
-      fileName: file.name,
-      fileSize: file.size,
+    return {
+      file,
+      bytes,
       fingerprint,
+      title,
+      author: meta.author,
       pageCount: doc.numPages,
       pageSizes,
       cover: cover.blob,
-      tint: cover.tint,
-      // New file and cover → upload them again.
-      filePath: undefined,
-      coverPath: undefined,
-      uploadError: undefined,
+      tint: cover.tint ?? '#e5e5e5',
+      duplicate,
+      match: duplicate ? undefined : await findListEntry(title, file.name),
     }
-    const blob = new Blob([bytes], { type: 'application/pdf' })
-
-    // A PDF for a book already on your reading list fills in that entry.
-    const entry = attachTo ? await db.books.get(attachTo) : await findListEntry(title, file.name)
-    if (entry) {
-      const book: Book = { ...entry, ...pdfFields, author: entry.author || meta.author }
-      await db.transaction('rw', db.books, db.files, async () => {
-        await db.books.put(book)
-        await db.files.put({ id: book.id, blob })
-      })
-      return { book, attached: true }
-    }
-
-    const maxOrder = (await db.books.orderBy('queueOrder').last())?.queueOrder ?? 0
-    const book: Book = {
-      id: uid(),
-      title,
-      author: meta.author,
-      ...pdfFields,
-      addedAt: Date.now(),
-      currentPage: 0,
-      pageOffset: 0,
-      furthestPage: 0,
-      status: 'queued',
-      queueOrder: maxOrder + 1,
-    }
-    await db.transaction('rw', db.books, db.files, async () => {
-      await db.books.add(book)
-      await db.files.add({ id: book.id, blob })
-    })
-    // Ask the browser not to evict the library under storage pressure.
-    navigator.storage?.persist?.().catch(() => {})
-    return { book, attached: false }
   } finally {
     closePdf(doc)
   }
+}
+
+export async function addAnalyzedPdf(
+  a: PdfAnalysis,
+  opts: { title?: string; author?: string; status?: BookStatus; attachTo?: string | null } = {},
+): Promise<ImportResult> {
+  if (a.duplicate) throw new DuplicateBookError(a.duplicate)
+  const pdfFields = {
+    fileName: a.file.name,
+    fileSize: a.file.size,
+    fingerprint: a.fingerprint,
+    pageCount: a.pageCount,
+    pageSizes: a.pageSizes,
+    cover: a.cover,
+    tint: a.tint,
+    // New file and cover → upload them again.
+    filePath: undefined,
+    coverPath: undefined,
+    uploadError: undefined,
+  }
+  const blob = new Blob([a.bytes as BlobPart], { type: 'application/pdf' })
+
+  // A PDF for a book already on your reading list fills in that entry.
+  const entryId = opts.attachTo === null ? undefined : (opts.attachTo ?? a.match?.id)
+  const entry = entryId ? await db.books.get(entryId) : undefined
+  if (entry) {
+    const book: Book = { ...entry, ...pdfFields, author: entry.author || opts.author?.trim() || a.author }
+    await db.transaction('rw', db.books, db.files, async () => {
+      await db.books.put(book)
+      await db.files.put({ id: book.id, blob })
+    })
+    return { book, attached: true }
+  }
+
+  const status = opts.status ?? 'queued'
+  const maxOrder = (await db.books.orderBy('queueOrder').last())?.queueOrder ?? 0
+  const now = Date.now()
+  const book: Book = {
+    id: uid(),
+    title: opts.title?.trim() || a.title,
+    author: opts.author?.trim() ?? a.author,
+    ...pdfFields,
+    addedAt: now,
+    currentPage: 0,
+    pageOffset: 0,
+    furthestPage: status === 'finished' ? Math.max(0, a.pageCount - 1) : 0,
+    status,
+    queueOrder: maxOrder + 1,
+    startedAt: status === 'reading' ? now : undefined,
+    finishedAt: status === 'finished' ? now : undefined,
+  }
+  await db.transaction('rw', db.books, db.files, async () => {
+    await db.books.add(book)
+    await db.files.add({ id: book.id, blob })
+  })
+  // Ask the browser not to evict the library under storage pressure.
+  navigator.storage?.persist?.().catch(() => {})
+  return { book, attached: false }
+}
+
+export async function importPdf(file: File, { attachTo }: { attachTo?: string } = {}): Promise<ImportResult> {
+  return addAnalyzedPdf(await analyzePdf(file), { attachTo })
+}
+
+export class DuplicateTitleError extends Error {
+  book: Book
+  constructor(book: Book) {
+    super(`"${book.title}" is already in your library`)
+    this.book = book
+  }
+}
+
+/** A book you don't have the PDF for yet — it lives on your reading list. */
+export async function addListBook(input: {
+  title: string
+  author?: string
+  status?: BookStatus
+  coverUrl?: string
+  estPages?: number
+  sourceUrl?: string
+}): Promise<Book> {
+  const title = input.title.trim()
+  const key = titleKey(title)
+  const existing = (await db.books.toArray()).find((b) => titleKey(b.title) === key)
+  if (existing) throw new DuplicateTitleError(existing)
+  const status = input.status ?? 'queued'
+  const now = Date.now()
+  const maxOrder = (await db.books.orderBy('queueOrder').last())?.queueOrder ?? 0
+  const book: Book = {
+    id: uid(),
+    title,
+    author: input.author?.trim() ?? '',
+    fileName: '',
+    fileSize: 0,
+    fingerprint: `list:${key}`,
+    pageCount: 0,
+    pageSizes: [],
+    addedAt: now,
+    currentPage: 0,
+    pageOffset: 0,
+    furthestPage: 0,
+    status,
+    queueOrder: maxOrder + 1,
+    finishedAt: status === 'finished' ? now : undefined,
+    startedAt: status === 'reading' ? now : undefined,
+    coverUrl: input.coverUrl,
+    estPages: input.estPages,
+    sourceUrl: input.sourceUrl,
+    // With a catalogue pick we already have the details.
+    enriched: input.coverUrl ? 1 : undefined,
+  }
+  await db.books.add(book)
+  return book
 }
 
 export interface BookSnapshot {
@@ -186,9 +283,9 @@ export async function renameBook(id: string, title: string, author: string) {
 }
 
 /** Progress 0–1 based on the furthest page reached. */
-export function bookProgress(b: Pick<Book, 'furthestPage' | 'pageCount' | 'status'>) {
+export function bookProgress(b: Pick<Book, 'furthestPage' | 'pageCount' | 'status' | 'readPages'>) {
   if (b.status === 'finished') return 1
   if (b.pageCount <= 1) return 0
-  // First page = 0%, last page = 100%, so an unopened book never shows progress.
-  return Math.min(1, b.furthestPage / (b.pageCount - 1))
+  // Share of pages actually read — jumping ahead doesn't move this.
+  return Math.min(1, readCount(b) / b.pageCount)
 }

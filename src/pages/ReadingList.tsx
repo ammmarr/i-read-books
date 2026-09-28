@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion, Reorder, useDragControls } from 'motion/react'
-import { BookCheck, BookOpen, FilePlus, GripVertical, ListPlus, Play } from 'lucide-react'
+import { BookCheck, BookOpen, BookPlus, FilePlus, GripVertical, ListPlus, Play } from 'lucide-react'
 import { useImporter } from '../components/Importer'
 import { db, type Book, type Session } from '../db/db'
 import { bookProgress, reorderQueue } from '../db/books'
@@ -33,6 +33,7 @@ export default function ReadingList() {
     <PageContainer className="max-w-[880px]">
       <PageHeader
         eyebrow="Plan"
+        actions={<AddToListButton />}
         title="Reading list"
         subtitle={
           queued.length
@@ -219,6 +220,18 @@ function EmptyQueue({ hasBooks }: { hasBooks: boolean }) {
       <p className="mx-auto mt-1 max-w-sm text-body-md text-mute">
         {hasBooks ? 'Use the ••• menu on any book and choose “Up next” to plan your next read.' : 'New books you add land here automatically.'}
       </p>
+      <div className="mt-5 flex justify-center">
+        <AddToListButton />
+      </div>
     </div>
+  )
+}
+
+function AddToListButton() {
+  const { openAdd } = useImporter()
+  return (
+    <Button variant="outline" onClick={() => openAdd('manual')}>
+      <BookPlus className="size-4" /> Add book
+    </Button>
   )
 }

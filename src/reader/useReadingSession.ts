@@ -6,8 +6,8 @@ import { startOfDay } from '../lib/stats'
 const IDLE_MS = 90_000
 /** Paused for this long → the next activity starts a brand-new session. */
 const SPLIT_MS = 5 * 60_000
-/** A page must stay on screen this long to count as "read". */
-const DWELL_S = 3
+/** Fallback when the caller doesn't know how much text a page has. */
+const DEFAULT_DWELL_S = 8
 const MIN_SESSION_S = 10
 const FLUSH_EVERY_S = 10
 
@@ -17,6 +17,10 @@ interface Options {
   enabled: boolean
   onGoalReached?: () => void
   goalSeconds: number
+  /** Active seconds a page must stay current to count as read (skimming doesn't). */
+  dwellFor?: (page: number) => number
+  /** Fired once per page per session when it has genuinely been read. */
+  onPageRead?: (page: number) => void
 }
 
 /**
@@ -24,13 +28,15 @@ interface Options {
  * and the reader has interacted recently, and writes the session to the DB
  * every few seconds so nothing is lost if the tab is killed.
  */
-export function useReadingSession({ bookId, currentPage, enabled, onGoalReached, goalSeconds }: Options) {
+export function useReadingSession({ bookId, currentPage, enabled, onGoalReached, goalSeconds, dwellFor, onPageRead }: Options) {
   const [sessionSeconds, setSessionSeconds] = useState(0)
   const [idle, setIdle] = useState(false)
   const state = useRef({
     session: null as Session | null,
     lastActivity: Date.now(),
-    pageSince: Date.now(),
+    /** Active (non-idle) seconds spent on the current page. */
+    pageActive: 0,
+    reported: new Set<number>(),
     page: currentPage,
     pages: new Set<number>(),
     todayBase: 0,
@@ -39,6 +45,10 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
   })
   const goalCb = useRef(onGoalReached)
   goalCb.current = onGoalReached
+  const dwellRef = useRef(dwellFor)
+  dwellRef.current = dwellFor
+  const readCb = useRef(onPageRead)
+  readCb.current = onPageRead
 
   // Seconds already read today (other sessions), to detect crossing the goal.
   useEffect(() => {
@@ -57,7 +67,7 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
     const st = state.current
     if (st.page !== currentPage) {
       st.page = currentPage
-      st.pageSince = Date.now()
+      st.pageActive = 0
     }
   }, [currentPage])
 
@@ -102,7 +112,14 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
       const s = st.session
       s.seconds += 1
       s.end = now
-      if ((now - st.pageSince) / 1000 >= DWELL_S) st.pages.add(st.page)
+      st.pageActive += 1
+      if (st.pageActive >= (dwellRef.current?.(st.page) ?? DEFAULT_DWELL_S)) {
+        st.pages.add(st.page)
+        if (!st.reported.has(st.page)) {
+          st.reported.add(st.page)
+          readCb.current?.(st.page)
+        }
+      }
       setSessionSeconds(s.seconds)
 
       if (!st.goalFired && goalSeconds > 0 && st.todayBase + s.seconds >= goalSeconds) {

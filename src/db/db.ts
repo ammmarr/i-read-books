@@ -35,8 +35,10 @@ export interface Book extends Synced {
   currentPage: number
   /** Fraction scrolled into the current page, to restore exactly. */
   pageOffset: number
-  /** Furthest page (0-based) the reader has reached. */
+  /** Furthest page (0-based) actually read (max of readPages). */
   furthestPage: number
+  /** Pages actually read (dwelled on), as compact ranges "0-12,15". Progress comes from this. */
+  readPages?: string
   status: BookStatus
   /** Sort key for the "Up next" queue. Lower = sooner. */
   queueOrder: number

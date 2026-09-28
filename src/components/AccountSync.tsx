@@ -1,12 +1,16 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Cloud, CloudAlert, CloudCheck, CloudDownload, CloudOff, LogOut, RefreshCw } from 'lucide-react'
+import { Check, Cloud, CloudAlert, CloudCheck, CloudDownload, CloudOff, LogOut, Pencil, RefreshCw, TriangleAlert, X } from 'lucide-react'
 import { NavLink } from 'react-router'
-import { cloudEnabled, supabase, useAuth } from '../lib/supabase'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { cloudEnabled, useAuth } from '../lib/supabase'
 import { downloadAllBooks, signOutAndStop, syncNow, useSyncState, type SyncStatus } from '../lib/sync'
-import { relativeTime } from '../lib/format'
+import { deleteAccount, updateName, type DeleteStep } from '../lib/auth'
+import { db } from '../db/db'
+import { formatDurationLong, relativeTime } from '../lib/format'
+import { AuthFlow, Spinner } from './auth/AuthFlow'
 import { Button } from './ui/Button'
-import { Segmented } from './ui/Segmented'
+import { Sheet } from './ui/Sheet'
 import { useToast } from './ui/Toast'
 
 const LABEL: Record<SyncStatus, string> = {
@@ -48,10 +52,11 @@ export function SyncIndicator() {
 }
 
 export function AccountSync() {
-  const { user, ready } = useAuth()
+  const { user, ready, name } = useAuth()
   const sync = useSyncState()
   const { toast } = useToast()
   const [dl, setDl] = useState<{ done: number; total: number } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   if (!cloudEnabled) {
     return (
@@ -62,28 +67,38 @@ export function AccountSync() {
     )
   }
   if (!ready) return <div className="skeleton h-24 rounded-md" />
-  if (!user) return <SignInForm />
+  if (!user) return <AuthFlow initial="signin" />
 
+  const display = name || user.email?.split('@')[0] || 'Reader'
   return (
     <div>
-      <div className="flex items-center gap-3 rounded-md border border-hairline p-4">
-        <div className="grid size-10 shrink-0 place-items-center rounded-full bg-ink text-[15px] font-semibold uppercase text-canvas">
-          {(user.email ?? '?')[0]}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-label-sm text-ink">{user.email}</div>
-          <div className="flex items-center gap-1.5 text-body-sm text-mute">
-            <StatusIcon status={sync.status} className="size-3.5" />
-            {sync.status === 'idle' && sync.lastSyncedAt ? `Synced ${relativeTime(sync.lastSyncedAt)}` : LABEL[sync.status]}
+      <div className="rounded-md border border-hairline p-4">
+        <div className="flex items-center gap-3">
+          <motion.div
+            initial={{ scale: 0.6, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="grid size-12 shrink-0 place-items-center rounded-full bg-ink text-[18px] font-semibold uppercase text-canvas"
+          >
+            {display[0]}
+          </motion.div>
+          <div className="min-w-0 flex-1">
+            <NameEditor name={name} fallback={display} />
+            <div className="truncate text-body-sm text-mute">{user.email}</div>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={() => syncNow()} disabled={sync.status === 'syncing'}>
-          <RefreshCw className={`size-3.5 ${sync.status === 'syncing' ? 'animate-spin' : ''}`} /> Sync now
-        </Button>
+        <div className="mt-4 flex items-center gap-2 border-t border-hairline pt-3">
+          <StatusIcon status={sync.status} className="size-3.5" />
+          <span className="min-w-0 flex-1 truncate text-body-sm text-body">
+            {sync.status === 'idle' && sync.lastSyncedAt ? `Synced ${relativeTime(sync.lastSyncedAt)}` : LABEL[sync.status]}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => syncNow()} disabled={sync.status === 'syncing'}>
+            <RefreshCw className={`size-3.5 ${sync.status === 'syncing' ? 'animate-spin' : ''}`} /> Sync now
+          </Button>
+        </div>
       </div>
       {sync.status === 'error' && sync.error && (
         <p className="mt-2 rounded-sm bg-warning/10 px-3 py-2 text-body-sm text-body">
-          {/relation .* does not exist|schema cache/i.test(sync.error)
+          {/relation .* does not exist|schema cache|Could not find the table/i.test(sync.error)
             ? 'The database tables are missing — run supabase/schema.sql in your Supabase SQL editor.'
             : sync.error}
         </p>
@@ -105,85 +120,190 @@ export function AccountSync() {
           <CloudDownload className="size-4" />
           {dl ? `Downloading ${dl.done} of ${dl.total}…` : 'Download all for offline'}
         </Button>
-        <Button variant="ghost" onClick={() => signOutAndStop().then(() => toast({ message: 'Signed out', description: 'Books stay on this device.' }))}>
+        <Button variant="ghost" onClick={() => signOutAndStop().then(() => toast({ message: 'Signed out', description: 'Your books stay on this device.' }))}>
           <LogOut className="size-4" /> Sign out
         </Button>
       </div>
+
+      <div className="mt-6 border-t border-hairline pt-4">
+        <button onClick={() => setDeleting(true)} className="text-body-md text-error underline-offset-4 hover:underline">
+          Delete account…
+        </button>
+        <p className="mt-0.5 text-body-sm text-faint">Permanently removes your cloud library and login.</p>
+      </div>
+      <DeleteAccount open={deleting} onClose={() => setDeleting(false)} email={user.email ?? ''} />
     </div>
   )
 }
 
-function SignInForm() {
-  const [mode, setMode] = useState<'in' | 'up'>('in')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+function NameEditor({ name, fallback }: { name: string; fallback: string }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(name)
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState<{ tone: 'error' | 'info'; text: string } | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  useEffect(() => setValue(name), [name])
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!supabase) return
+  const save = async () => {
+    if (!value.trim()) return setErr('Name can’t be empty.')
+    if (value.trim() === name) return setEditing(false)
     setBusy(true)
-    setMsg(null)
-    const redirect = window.location.origin + window.location.pathname
-    const { data, error } =
-      mode === 'in'
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirect } })
+    const r = await updateName(value)
     setBusy(false)
-    if (error) return setMsg({ tone: 'error', text: error.message })
-    if (mode === 'up' && !data.session) setMsg({ tone: 'info', text: 'Check your inbox to confirm your email, then sign in here.' })
+    if (!r.ok) return setErr(r.error)
+    setErr(null)
+    setEditing(false)
+  }
+
+  if (!editing)
+    return (
+      <button onClick={() => setEditing(true)} className="group flex max-w-full items-center gap-1.5 text-left" aria-label="Edit your name">
+        <span className="truncate text-label-sm text-ink">{name || fallback}</span>
+        <Pencil className="size-3.5 shrink-0 text-faint transition-colors group-hover:text-ink" />
+      </button>
+    )
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault()
+        save()
+      }}
+      className="flex items-center gap-1"
+    >
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => e.key === 'Escape' && (setEditing(false), setValue(name))}
+        placeholder="Your name"
+        autoComplete="name"
+        className={`h-8 min-w-0 flex-1 rounded-sm border bg-canvas-elevated px-2 text-label-sm text-ink outline-none focus:ring-3 ${err ? 'border-error ring-error/15' : 'border-link ring-link/15'}`}
+      />
+      <button type="submit" aria-label="Save name" disabled={busy} className="grid size-8 place-items-center rounded-full text-success hover:bg-hairline-soft">
+        {busy ? <Spinner /> : <Check className="size-4" />}
+      </button>
+      <button type="button" aria-label="Cancel" onClick={() => (setEditing(false), setValue(name), setErr(null))} className="grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft">
+        <X className="size-4" />
+      </button>
+    </form>
+  )
+}
+
+const STEP_LABEL: Record<DeleteStep, string> = {
+  files: 'Removing your uploaded books…',
+  account: 'Deleting your account…',
+  device: 'Tidying up this device…',
+  done: 'Done',
+}
+
+function DeleteAccount({ open, onClose, email }: { open: boolean; onClose: () => void; email: string }) {
+  const { toast } = useToast()
+  const [erase, setErase] = useState(false)
+  const [typed, setTyped] = useState('')
+  const [step, setStep] = useState<DeleteStep | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const counts = useLiveQuery(async () => {
+    const [books, highlights, sessions] = await Promise.all([db.books.count(), db.highlights.count(), db.sessions.toArray()])
+    return { books, highlights, seconds: sessions.reduce((a, s) => a + s.seconds, 0) }
+  }, [])
+
+  useEffect(() => {
+    if (open) {
+      setTyped('')
+      setError(null)
+      setStep(null)
+      setErase(false)
+    }
+  }, [open])
+
+  const ready = typed.trim().toUpperCase() === 'DELETE'
+  const working = step !== null && step !== 'done'
+
+  const run = async () => {
+    setError(null)
+    const r = await deleteAccount({ eraseDevice: erase, onStep: setStep })
+    if (!r.ok) {
+      setStep(null)
+      return setError(r.error)
+    }
+    toast({ message: 'Your account is deleted', description: erase ? 'This device is empty now.' : 'Your books are still here, on this device only.', duration: 6000 })
+    setTimeout(onClose, 300)
   }
 
   return (
-    <form onSubmit={submit} className="space-y-3">
-      <Segmented
-        size="sm"
-        value={mode}
-        onChange={(m) => {
-          setMode(m)
-          setMsg(null)
-        }}
-        options={[
-          { value: 'in', label: 'Sign in' },
-          { value: 'up', label: 'Create account' },
-        ]}
-      />
-      <input
-        type="email"
-        required
-        autoComplete="email"
-        placeholder="Email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        className="h-10 w-full rounded-sm border border-hairline bg-canvas-elevated px-3 text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-link focus:ring-3 focus:ring-link/15"
-      />
-      <input
-        type="password"
-        required
-        minLength={6}
-        autoComplete={mode === 'in' ? 'current-password' : 'new-password'}
-        placeholder="Password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        className="h-10 w-full rounded-sm border border-hairline bg-canvas-elevated px-3 text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-link focus:ring-3 focus:ring-link/15"
-      />
-      <AnimatePresence>
-        {msg && (
-          <motion.p
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className={`text-body-sm ${msg.tone === 'error' ? 'text-error' : 'text-body'}`}
+    <Sheet open={open} onClose={working ? () => {} : onClose} title="Delete your account?" width={460}>
+      <div className="flex gap-3 rounded-md border border-error/25 bg-error/5 p-3.5">
+        <TriangleAlert className="mt-0.5 size-5 shrink-0 text-error" />
+        <div className="text-body-md text-ink">
+          This permanently deletes <span className="font-medium">{email}</span> and everything stored in the cloud
+          {counts ? (
+            <>
+              : <span className="font-medium">{counts.books} books</span>, <span className="font-medium">{counts.highlights} highlights & notes</span>
+              {counts.seconds > 60 && (
+                <>
+                  , <span className="font-medium">{formatDurationLong(counts.seconds)}</span> of reading history
+                </>
+              )}
+              , and every uploaded PDF.
+            </>
+          ) : (
+            '.'
+          )}{' '}
+          It can’t be undone.
+        </div>
+      </div>
+
+      <fieldset className="mt-5 space-y-2" disabled={working}>
+        <legend className="mb-2 text-label-sm text-ink">This device</legend>
+        {[
+          { v: false, title: 'Keep my books here', body: 'Carry on reading offline. Nothing on this device changes.' },
+          { v: true, title: 'Erase this device too', body: 'Remove every book, highlight and statistic from this device.' },
+        ].map((o) => (
+          <label
+            key={String(o.v)}
+            className={`flex cursor-pointer gap-3 rounded-md border p-3 transition-colors ${erase === o.v ? 'border-ink bg-hairline-soft' : 'border-hairline hover:bg-hairline-soft/60'}`}
           >
-            {msg.text}
+            <input type="radio" name="erase" className="mt-1 accent-[var(--color-ink)]" checked={erase === o.v} onChange={() => setErase(o.v)} />
+            <span>
+              <span className="block text-body-md text-ink">{o.title}</span>
+              <span className="block text-body-sm text-mute">{o.body}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+
+      <label className="mt-5 block">
+        <span className="mb-1.5 block text-label-sm text-ink">
+          Type <span className="font-mono">DELETE</span> to confirm
+        </span>
+        <input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          disabled={working}
+          autoCapitalize="characters"
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="DELETE"
+          className="h-11 w-full rounded-sm border border-hairline bg-canvas-elevated px-3 font-mono text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-error focus:ring-3 focus:ring-error/15"
+        />
+      </label>
+
+      <AnimatePresence>
+        {error && (
+          <motion.p initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} role="alert" className="mt-3 text-body-sm text-error">
+            {error}
           </motion.p>
         )}
       </AnimatePresence>
-      <Button type="submit" disabled={busy} className="w-full">
-        {busy ? 'One moment…' : mode === 'in' ? 'Sign in & sync' : 'Create account'}
-      </Button>
-      <p className="text-body-sm text-faint">Books you already added here upload to your account after you sign in.</p>
-    </form>
+
+      <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button variant="ghost" onClick={onClose} disabled={working}>
+          Keep my account
+        </Button>
+        <Button variant="danger" onClick={run} disabled={!ready || working}>
+          {working && <Spinner />}
+          {working ? STEP_LABEL[step!] : 'Delete account forever'}
+        </Button>
+      </div>
+    </Sheet>
   )
 }

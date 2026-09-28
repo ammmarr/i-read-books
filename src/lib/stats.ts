@@ -1,4 +1,5 @@
 import type { Book, Session } from '../db/db'
+import { readCount } from './pages'
 
 export type RangeKey = '7d' | '30d' | '90d' | '1y' | 'all'
 
@@ -294,7 +295,7 @@ export function bookStats(book: Book, sessions: Session[], fallbackPagesPerHour 
   // re-reading a chapter would make you look slower than you are.
   const turned = own.reduce((a, s) => a + s.pages.length, 0)
   const pph = seconds > 300 && turned > 2 ? turned / (seconds / 3600) : fallbackPagesPerHour
-  const remainingPages = Math.max(0, book.pageCount - (book.furthestPage + 1))
+  const remainingPages = Math.max(0, book.pageCount - readCount(book))
   return {
     seconds,
     pages,

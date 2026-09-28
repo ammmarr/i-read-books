@@ -5,10 +5,15 @@ import { useNavigate } from 'react-router'
 import { DuplicateBookError, importPdf } from '../db/books'
 import { importReadingList, readListCsv } from '../lib/readingList'
 import { useToast } from './ui/Toast'
+import { AddBookSheet, type AddTab } from './AddBook'
 
 interface Ctx {
-  /** Opens the system file picker (PDFs, or a reading-list CSV). */
+  /** Opens "Add a book" (PDF tab). */
   pick: () => void
+  /** Opens "Add a book" on a given tab. */
+  openAdd: (tab?: AddTab) => void
+  /** Straight to the file picker for a reading-list CSV. */
+  pickCsv: () => void
   /** Pick a PDF for a specific reading-list entry. */
   attach: (bookId: string) => void
   importFiles: (files: File[], opts?: { attachTo?: string }) => Promise<void>
@@ -31,6 +36,16 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const input = useRef<HTMLInputElement>(null)
   const attachTarget = useRef<string | undefined>(undefined)
+  /** What the shared file input is being used for right now. */
+  const pickMode = useRef<'sheet' | 'attach' | 'csv'>('sheet')
+  const [addOpen, setAddOpen] = useState(false)
+  const [addTab, setAddTab] = useState<AddTab>('pdf')
+  const [incoming, setIncoming] = useState<{ batch: number; files: File[] }>({ batch: 0, files: [] })
+  const review = useCallback((files: File[]) => {
+    setAddTab('pdf')
+    setAddOpen(true)
+    setIncoming((x) => ({ batch: x.batch + 1, files }))
+  }, [])
   const [busy, setBusy] = useState(false)
   const [dragging, setDragging] = useState(false)
   const depth = useRef(0)
@@ -114,10 +129,10 @@ export function ImportProvider({ children }: { children: ReactNode }) {
 
   // PDFs opened from other Android apps.
   useEffect(() => {
-    const onOpen = (e: Event) => void importFiles([(e as CustomEvent<File>).detail])
+    const onOpen = (e: Event) => review([(e as CustomEvent<File>).detail])
     window.addEventListener('irb-open-file', onOpen)
     return () => window.removeEventListener('irb-open-file', onOpen)
-  }, [importFiles])
+  }, [review])
 
   // Drag & drop anywhere in the window.
   useEffect(() => {
@@ -141,7 +156,13 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       e.preventDefault()
       depth.current = 0
       setDragging(false)
-      importFiles([...(e.dataTransfer?.files ?? [])])
+      const files = [...(e.dataTransfer?.files ?? [])]
+      const csvs = files.filter(isCsv)
+      const pdfs = files.filter(isPdf)
+      if (csvs.length) void importFiles(csvs)
+      if (pdfs.length) review(pdfs)
+      else if (!csvs.length && files.length)
+        toast({ tone: 'error', message: 'Only PDF files can be added', description: 'Or a reading-list CSV (Notion, Goodreads).' })
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
@@ -153,17 +174,31 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('dragleave', leave)
       window.removeEventListener('drop', drop)
     }
-  }, [importFiles])
+  }, [importFiles, review, toast])
 
-  const pick = useCallback(() => {
-    attachTarget.current = undefined
+  const openAdd = useCallback((tab: AddTab = 'pdf') => {
+    setAddTab(tab)
+    setAddOpen(true)
+  }, [])
+  const pick = useCallback(() => openAdd('pdf'), [openAdd])
+  const browsePdfs = useCallback(() => {
+    pickMode.current = 'sheet'
     if (input.current) {
-      input.current.accept = 'application/pdf,.pdf,text/csv,.csv'
+      input.current.accept = 'application/pdf,.pdf'
       input.current.multiple = true
       input.current.click()
     }
   }, [])
+  const pickCsv = useCallback(() => {
+    pickMode.current = 'csv'
+    if (input.current) {
+      input.current.accept = 'text/csv,.csv'
+      input.current.multiple = false
+      input.current.click()
+    }
+  }, [])
   const attach = useCallback((bookId: string) => {
+    pickMode.current = 'attach'
     attachTarget.current = bookId
     if (input.current) {
       input.current.accept = 'application/pdf,.pdf'
@@ -173,7 +208,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <ImportCtx.Provider value={{ pick, attach, importFiles, busy }}>
+    <ImportCtx.Provider value={{ pick, openAdd, pickCsv, attach, importFiles, busy }}>
       {children}
       <input
         ref={input}
@@ -182,9 +217,32 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         multiple
         hidden
         onChange={(e) => {
-          importFiles([...(e.target.files ?? [])], { attachTo: attachTarget.current })
-          attachTarget.current = undefined
+          const files = [...(e.target.files ?? [])]
           e.target.value = ''
+          if (pickMode.current === 'sheet') review(files)
+          else void importFiles(files, { attachTo: pickMode.current === 'attach' ? attachTarget.current : undefined })
+          attachTarget.current = undefined
+          pickMode.current = 'sheet'
+        }}
+      />
+      <AddBookSheet
+        open={addOpen}
+        onClose={() => setAddOpen(false)}
+        tab={addTab}
+        onTab={setAddTab}
+        incoming={incoming}
+        onBrowse={browsePdfs}
+        onAdded={({ added, attached, lastId, listOnly, title }) => {
+          if (listOnly) return toast({ id: 'add-list', message: 'Added to your reading list', description: title, duration: 2500 })
+          const total = added + attached
+          if (!total) return
+          const id = lastId
+          toast({
+            tone: 'success',
+            message: total > 1 ? `${total} books ready` : attached ? 'PDF added to your list book' : 'Book added',
+            description: attached && !added ? 'It kept its place on your reading list.' : attached ? `${attached} matched books on your reading list.` : undefined,
+            action: total === 1 && id ? { label: 'Read now', onClick: () => navigate(`/read/${id}`) } : undefined,
+          })
         }}
       />
       <AnimatePresence>

@@ -23,7 +23,7 @@ export default function SettingsPage() {
   const { available, install } = useInstallPrompt()
   const [storage, setStorage] = useState<{ usage: number; quota: number; persisted: boolean } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const { pick } = useImporter()
+  const { pickCsv } = useImporter()
 
   const refreshStorage = async () => {
     const est = await navigator.storage?.estimate?.().catch(() => null)
@@ -174,7 +174,7 @@ export default function SettingsPage() {
           <Button variant="outline" onClick={() => fileRef.current?.click()}>
             <Upload className="size-4" /> Restore backup
           </Button>
-          <Button variant="outline" onClick={pick}>
+          <Button variant="outline" onClick={pickCsv}>
             <ListPlus className="size-4" /> Import reading list (CSV)
           </Button>
           <input

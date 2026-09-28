@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowLeft, BookOpen, Copy, ExternalLink, FilePlus, Pencil, Trash2 } from 'lucide-react'
 import { useImporter } from '../components/Importer'
+import { readCount } from '../lib/pages'
 import { db, type Highlight, type HighlightColor } from '../db/db'
 import { bookProgress, renameBook, setStatus } from '../db/books'
 import { PageContainer } from '../components/AppShell'
@@ -119,7 +120,7 @@ export default function BookDetail() {
 
           {book.pageCount > 0 && <div className="mt-6 max-w-md">
             <div className="mb-2 flex justify-between text-body-sm">
-              <span className="text-ink"><span className="font-medium">{Math.round(p * 100)}%</span> <span className="text-mute">· page {book.furthestPage + 1} of {book.pageCount}</span></span>
+              <span className="text-ink"><span className="font-medium">{Math.round(p * 100)}%</span> <span className="text-mute">· {readCount(book)} of {book.pageCount} pages read</span></span>
               {st.remainingSeconds ? <span className="text-mute">~{formatDurationLong(st.remainingSeconds)} left</span> : null}
             </div>
             <ProgressBar value={p} />

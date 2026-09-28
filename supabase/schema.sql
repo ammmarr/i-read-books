@@ -35,6 +35,7 @@ create table if not exists public.irb_books (
   current_page    int,
   page_offset     double precision,
   furthest_page   int,
+  read_pages      text,
   status          text,
   queue_order     double precision,
   started_at      bigint,
@@ -95,6 +96,9 @@ create table if not exists public.irb_profiles (
   server_ts   bigint
 );
 
+-- (for projects created before read_pages existed)
+alter table public.irb_books add column if not exists read_pages text;
+
 -- ── triggers, indexes, row-level security (only you can see your rows)
 do $$
 declare t text;
@@ -127,3 +131,19 @@ create policy "irb own files update" on storage.objects for update to authentica
   using (bucket_id = 'irb-books' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "irb own files delete" on storage.objects for delete to authenticated
   using (bucket_id = 'irb-books' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- ── delete my account (called from Settings → Delete account)
+-- The app empties your storage folder first (storage rows can only be removed
+-- through the Storage API); deleting the auth user then cascades to every
+-- irb_* table above.
+create or replace function public.irb_delete_account() returns void
+language plpgsql security definer set search_path = '' as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not signed in';
+  end if;
+  delete from auth.users where id = auth.uid();
+end $$;
+
+revoke all on function public.irb_delete_account() from public, anon;
+grant execute on function public.irb_delete_account() to authenticated;

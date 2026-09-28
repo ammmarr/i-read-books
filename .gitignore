@@ -8,3 +8,4 @@ public/pdfjs
 .env.local
 
 .vercel
+supabase/seed_reading_list.sql

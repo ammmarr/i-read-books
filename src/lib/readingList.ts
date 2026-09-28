@@ -137,6 +137,107 @@ export async function importReadingList(items: ListItem[]) {
 
 let enriching = false
 
+export interface CatalogBook {
+  title: string
+  author?: string
+  cover?: string
+  pages?: number
+  year?: number
+  editions: number
+}
+
+type OLDoc = {
+  title?: string
+  subtitle?: string
+  alternative_title?: string[]
+  author_name?: string[]
+  cover_i?: number
+  number_of_pages_median?: number
+  first_publish_year?: number
+  edition_count?: number
+}
+
+const OL_FIELDS = 'title,subtitle,alternative_title,author_name,cover_i,number_of_pages_median,first_publish_year,edition_count'
+
+const toCatalog = (d: OLDoc): CatalogBook => ({
+  title: d.title ?? '',
+  author: d.author_name?.[0],
+  cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg` : undefined,
+  pages: d.number_of_pages_median,
+  year: d.first_publish_year,
+  editions: d.edition_count ?? 0,
+})
+
+async function olSearch(q: string, limit = 10, signal?: AbortSignal): Promise<OLDoc[]> {
+  const res = await fetch(`https://openlibrary.org/search.json?${new URLSearchParams({ q, limit: String(limit), fields: OL_FIELDS })}`, { signal })
+  return res.ok ? (((await res.json()) as { docs?: OLDoc[] }).docs ?? []) : []
+}
+
+/**
+ * The catalogue entry that really is this book. Open Library returns plenty of
+ * look-alikes ("Summary of …", workbooks, one-off reprints), so a result must
+ * either carry this exact title (incl. subtitles/alternate titles) or be a
+ * well-established work that shares most of the title's words.
+ */
+export async function findInCatalog(title: string, author?: string): Promise<CatalogBook | null> {
+  let docs = await olSearch(author ? `${title} ${author}` : title)
+  if (!docs.length && author) docs = await olSearch(title)
+  const key = titleKey(title)
+  const words = key.split(' ').filter((w) => w.length > 2)
+  const names = (d: OLDoc) => [d.title, d.subtitle, d.title && d.subtitle ? `${d.title} ${d.subtitle}` : null, ...(d.alternative_title ?? [])].filter(Boolean) as string[]
+  const exact = (d: OLDoc) => names(d).some((n) => {
+    const k = titleKey(n)
+    return k === key || k.startsWith(key + ' ')
+  })
+  const overlap = (d: OLDoc) => {
+    const hay = titleKey([...names(d), ...(d.author_name ?? [])].join(' '))
+    return words.filter((w) => hay.includes(w)).length / Math.max(1, words.length)
+  }
+  const best = docs
+    .filter((d) => exact(d) || ((d.edition_count ?? 0) >= 5 && overlap(d) >= 0.6))
+    .sort((a, b) => (b.edition_count ?? 0) - (a.edition_count ?? 0))[0]
+  return best ? toCatalog(best) : null
+}
+
+/** Type-ahead suggestions for "Add a book without a PDF". */
+export async function suggestBooks(query: string, signal?: AbortSignal): Promise<CatalogBook[]> {
+  const q = query.trim()
+  if (q.length < 2) return []
+  const docs = await olSearch(q, 12, signal)
+  const key = titleKey(q)
+  const words = key.split(' ').filter(Boolean)
+  // How well a title matches what you typed: the start of a title beats
+  // containing all your words, which beats a loose hit.
+  const score = (t: string) => {
+    const k = titleKey(t)
+    if (k === key) return 0
+    if (k.startsWith(key)) return 1
+    if (words.every((w) => k.includes(w))) return 2
+    return 3
+  }
+  const best = new Map<string, { b: CatalogBook; rank: number; i: number }>()
+  docs.forEach((d, i) => {
+    if (!d.title) return
+    // Famous books are often filed under their original title (嫌われる勇気);
+    // match — and show — the alternate title you actually typed.
+    const names = [d.title, ...(d.alternative_title ?? [])]
+    let shown = names.reduce((a, n) => (score(n) < score(a) ? n : a), d.title)
+    // Open Library's top hit is a well-known work catalogued only under a
+    // non-Latin original title: show it under the title you typed.
+    if (i === 0 && !/[a-z]/i.test(d.title) && (d.edition_count ?? 0) >= 5 && /[a-z]/i.test(q)) shown = titleCase(q)
+    const b = { ...toCatalog(d), title: shown }
+    const rank = score(shown)
+    const k = `${titleKey(b.title)}|${b.author ?? ''}`
+    const prev = best.get(k)
+    if (!prev || b.editions > prev.b.editions) best.set(k, { b: prev && !b.cover ? { ...b, cover: prev.b.cover } : b, rank, i: prev?.i ?? i })
+  })
+  return [...best.values()]
+    // Match quality first; among equals the well-known edition wins, then OL's order.
+    .sort((x, y) => x.rank - y.rank || Math.sign(y.b.editions - x.b.editions) * (Math.abs(y.b.editions - x.b.editions) >= 3 ? 1 : 0) || x.i - y.i)
+    .map((x) => x.b)
+    .slice(0, 6)
+}
+
 /**
  * Looks up covers, authors and page counts on Open Library for books that
  * don't have a PDF yet. Only the title and author are sent.
@@ -148,29 +249,12 @@ export async function enrichFromOpenLibrary() {
     const todo = await db.books.filter((b) => b.pageCount === 0 && !b.enriched && !b.coverUrl && !b.cover).toArray()
     for (const b of todo) {
       try {
-        const q = new URLSearchParams({ title: b.title, limit: '5', fields: 'title,author_name,cover_i,number_of_pages_median' })
-        if (b.author) q.set('author', b.author)
-        type Doc = { title?: string; author_name?: string[]; cover_i?: number; number_of_pages_median?: number }
-        const search = async () => {
-          const res = await fetch(`https://openlibrary.org/search.json?${q}`)
-          return res.ok ? (((await res.json()) as { docs?: Doc[] }).docs ?? []) : []
-        }
-        let docs = await search()
-        if (!docs.length && b.author) {
-          q.delete('author')
-          docs = await search()
-        }
-        // Only trust a result whose title really is this book — not a
-        // "Summary of …" or a workbook that happens to rank first.
-        const key = titleKey(b.title)
-        const doc = docs.find((d) => {
-          const k = titleKey(d.title ?? '')
-          return k === key || k.startsWith(key + ' ')
-        })
+        const hit = await findInCatalog(b.title, b.author || undefined)
         const patch: Partial<Book> = {}
-        if (doc?.cover_i) patch.coverUrl = `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`
-        if (doc?.author_name?.[0] && !b.author) patch.author = doc.author_name[0]
-        if (doc?.number_of_pages_median && !b.estPages) patch.estPages = doc.number_of_pages_median
+        if (hit?.cover) patch.coverUrl = hit.cover
+        // Only borrow an author from a well-established edition.
+        if (hit?.author && !b.author && hit.editions >= 3) patch.author = hit.author
+        if (hit?.pages && !b.estPages) patch.estPages = hit.pages
         if (Object.keys(patch).length) await db.books.update(b.id, patch)
       } catch {
         /* offline or rate-limited — try again another time */

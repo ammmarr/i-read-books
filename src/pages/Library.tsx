@@ -17,6 +17,7 @@ import { useSettings } from '../lib/settings'
 import { bookStats, dailyTotals, streaks, summarize, todaySeconds } from '../lib/stats'
 import { formatDurationLong, greeting, pluralize } from '../lib/format'
 import { useIsTouch } from '../lib/hooks'
+import { useAuth } from '../lib/supabase'
 
 type Filter = 'all' | BookStatus
 type Sort = 'recent' | 'added' | 'title' | 'progress'
@@ -32,6 +33,7 @@ export default function Library() {
   const books = useLiveQuery(() => db.books.toArray(), [])
   const sessions = useLiveQuery(() => db.sessions.toArray(), [])
   const { pick } = useImporter()
+  const { name } = useAuth()
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<Sort>(() => (localStorage.getItem('irb-sort') as Sort) || 'recent')
   const [query, setQuery] = useState('')
@@ -68,7 +70,8 @@ export default function Library() {
   return (
     <PageContainer>
       <div className="mb-2 text-mono-eyebrow text-mute">
-        {greeting()} · {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+        {greeting()}
+        {name ? `, ${name.split(' ')[0]}` : ''} · {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">

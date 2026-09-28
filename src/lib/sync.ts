@@ -4,6 +4,7 @@ import {
   type Book, type Bookmark, type Highlight, type Session, type SyncTable,
 } from '../db/db'
 import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
+import { formatPages, readPagesOf } from './pages'
 import { SYNCED_SETTINGS, getSettings, getSettingsMeta, setSettingsChangeListener, setSettingsMeta, updateSettings, type Settings } from './settings'
 
 /**
@@ -60,7 +61,7 @@ function toRemote(table: SyncTable, r: Row): Row {
       return {
         id: b.id, title: b.title, author: b.author, file_name: b.fileName, file_size: b.fileSize, fingerprint: b.fingerprint,
         page_count: b.pageCount, page_sizes: b.pageSizes, tint: n(b.tint), added_at: b.addedAt, last_opened_at: n(b.lastOpenedAt),
-        current_page: b.currentPage, page_offset: b.pageOffset, furthest_page: b.furthestPage, status: b.status,
+        current_page: b.currentPage, page_offset: b.pageOffset, furthest_page: b.furthestPage, read_pages: n(b.readPages), status: b.status,
         queue_order: b.queueOrder, started_at: n(b.startedAt), finished_at: n(b.finishedAt), file_path: n(b.filePath),
         cover_path: n(b.coverPath), cover_url: n(b.coverUrl), source_url: n(b.sourceUrl), est_pages: n(b.estPages),
         updated_at: b.updatedAt ?? Date.now(), deleted: false,
@@ -100,7 +101,7 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
         id: r.id, title: r.title ?? '', author: r.author ?? '', fileName: r.file_name ?? '', fileSize: r.file_size ?? 0,
         fingerprint: r.fingerprint ?? '', pageCount: r.page_count ?? 0, pageSizes: r.page_sizes ?? [], tint: u(r.tint as string | null),
         addedAt: r.added_at ?? Date.now(), lastOpenedAt: u(r.last_opened_at as number | null), currentPage: r.current_page ?? 0,
-        pageOffset: r.page_offset ?? 0, furthestPage: r.furthest_page ?? 0, status: r.status ?? 'queued',
+        pageOffset: r.page_offset ?? 0, furthestPage: r.furthest_page ?? 0, readPages: u(r.read_pages as string | null), status: r.status ?? 'queued',
         queueOrder: r.queue_order ?? 0, startedAt: u(r.started_at as number | null), finishedAt: u(r.finished_at as number | null),
         filePath: u(r.file_path as string | null), coverPath, coverUrl: u(r.cover_url as string | null),
         sourceUrl: u(r.source_url as string | null), estPages: u(r.est_pages as number | null),
@@ -161,7 +162,21 @@ async function pull(userId: string) {
             continue
           }
           if (local?.dirty && (local.updatedAt ?? 0) > (row.updated_at as number)) continue
-          await db.table(t).put(fromRemote(t, row, local))
+          const next = fromRemote(t, row, local)
+          if (t === 'books' && local) {
+            // Pages read on two devices add up — a newer row mustn't erase
+            // what the other device read.
+            const mine = readPagesOf(local as unknown as Book)
+            const theirs = readPagesOf(next as unknown as Book)
+            const union = new Set([...theirs, ...mine])
+            if (union.size > theirs.size) {
+              next.readPages = formatPages(union)
+              next.furthestPage = Math.max(...union)
+              next.dirty = 1
+              next.updatedAt = Date.now()
+            }
+          }
+          await db.table(t).put(next)
           if (t === 'books' && row.cover_path) touchedCovers = true
         }
       })
@@ -368,6 +383,16 @@ export async function downloadAllBooks(onProgress?: (done: number, total: number
     onProgress?.(++done, todo.length)
   }
   return todo.length
+}
+
+/** Forget pull positions for a user (after deleting the account, a new one starts from zero). */
+export function resetSyncCursors(userId: string) {
+  try {
+    for (const t of [...SYNC_TABLES]) localStorage.removeItem(cursorKey(userId, t))
+  } catch {
+    /* ignore */
+  }
+  set({ status: 'signed-out', lastSyncedAt: null, error: null })
 }
 
 export async function signOutAndStop() {

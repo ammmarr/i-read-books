@@ -1,5 +1,6 @@
 import { db, type Book, type Bookmark, type Highlight, type Session } from '../db/db'
 import { isNative, shareTextFile } from './native'
+import { formatPages, readPagesOf } from './pages'
 
 interface BackupFile {
   app: 'i-read-books'
@@ -58,6 +59,7 @@ export async function importBackup(file: File) {
     await db.books.update(l.id, {
       currentPage: Math.max(l.currentPage, b.currentPage),
       furthestPage: Math.max(l.furthestPage, b.furthestPage),
+      readPages: formatPages(new Set([...readPagesOf(l), ...readPagesOf(b)])),
       status: b.status,
       finishedAt: b.finishedAt ?? l.finishedAt,
       startedAt: b.startedAt ?? l.startedAt,
