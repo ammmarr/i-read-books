@@ -33,10 +33,19 @@ if (typeof window !== 'undefined') {
 }
 
 /** null when the app is built without Supabase settings — it then runs local-only. */
+/** While the page is being hidden/closed, small requests use keepalive so they still reach the server. */
+const leavingFetch: typeof fetch = (input, init) => {
+  const body = init?.body
+  const small = body == null || (typeof body === 'string' && body.length < 60_000)
+  const leaving = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+  return fetch(input, leaving && small ? { ...init, keepalive: true } : init)
+}
+
 export const supabase: SupabaseClient | null =
   url && key
     ? createClient(url, key, {
         auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce', storageKey: 'irb-auth' },
+        global: { fetch: leavingFetch },
       })
     : null
 

@@ -63,7 +63,7 @@ function toRemote(table: SyncTable, r: Row): Row {
       return {
         id: b.id, title: b.title, author: b.author, file_name: b.fileName, file_size: b.fileSize, fingerprint: b.fingerprint,
         page_count: b.pageCount, page_sizes: b.pageSizes, tint: n(b.tint), added_at: b.addedAt, last_opened_at: n(b.lastOpenedAt),
-        current_page: b.currentPage, page_offset: b.pageOffset, furthest_page: b.furthestPage, read_pages: n(b.readPages), read_pages_set_at: n(b.readPagesSetAt), status: b.status,
+        current_page: b.currentPage, page_offset: b.pageOffset, position_at: n(b.positionAt), furthest_page: b.furthestPage, read_pages: n(b.readPages), read_pages_set_at: n(b.readPagesSetAt), status: b.status,
         queue_order: b.queueOrder, started_at: n(b.startedAt), finished_at: n(b.finishedAt), file_path: n(b.filePath),
         cover_path: n(b.coverPath), cover_url: n(b.coverUrl), source_url: n(b.sourceUrl), est_pages: n(b.estPages),
         updated_at: b.updatedAt ?? Date.now(), deleted: false,
@@ -103,7 +103,7 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
         id: r.id, title: r.title ?? '', author: r.author ?? '', fileName: r.file_name ?? '', fileSize: r.file_size ?? 0,
         fingerprint: r.fingerprint ?? '', pageCount: r.page_count ?? 0, pageSizes: r.page_sizes ?? [], tint: u(r.tint as string | null),
         addedAt: r.added_at ?? Date.now(), lastOpenedAt: u(r.last_opened_at as number | null), currentPage: r.current_page ?? 0,
-        pageOffset: r.page_offset ?? 0, furthestPage: r.furthest_page ?? 0, readPages: u(r.read_pages as string | null), readPagesSetAt: u(r.read_pages_set_at as number | null), status: r.status ?? 'queued',
+        pageOffset: r.page_offset ?? 0, positionAt: u(r.position_at as number | null), furthestPage: r.furthest_page ?? 0, readPages: u(r.read_pages as string | null), readPagesSetAt: u(r.read_pages_set_at as number | null), status: r.status ?? 'queued',
         queueOrder: r.queue_order ?? 0, startedAt: u(r.started_at as number | null), finishedAt: u(r.finished_at as number | null),
         filePath: u(r.file_path as string | null), coverPath, coverUrl: u(r.cover_url as string | null),
         sourceUrl: u(r.source_url as string | null), estPages: u(r.est_pages as number | null),
@@ -163,8 +163,27 @@ async function pull(userId: string) {
             }
             continue
           }
-          if (local?.dirty && (local.updatedAt ?? 0) > (row.updated_at as number)) continue
+          // Reading position merges on its own clock: where you last *moved* wins,
+          // whatever else changed on either side.
+          const remotePosAt = t === 'books' ? (row.position_at === undefined ? (row.updated_at as number) : ((row.position_at as number | null) ?? 0)) : 0
+          const localPosAt = t === 'books' ? (((local as unknown as Book | undefined)?.positionAt) ?? 0) : 0
+          if (local?.dirty && (local.updatedAt ?? 0) > (row.updated_at as number)) {
+            if (t === 'books' && remotePosAt > localPosAt) {
+              await db.table(t).update(id, { currentPage: row.current_page ?? 0, pageOffset: row.page_offset ?? 0, positionAt: remotePosAt })
+            }
+            continue
+          }
           const next = fromRemote(t, row, local)
+          if (t === 'books' && local && localPosAt > remotePosAt) {
+            const lb0 = local as unknown as Book
+            next.currentPage = lb0.currentPage
+            next.pageOffset = lb0.pageOffset
+            next.positionAt = lb0.positionAt
+            if (lb0.currentPage !== row.current_page || lb0.pageOffset !== row.page_offset) {
+              next.dirty = 1
+              next.updatedAt = Date.now()
+            }
+          }
           const lb = local as unknown as Book | undefined
           const rb = next as unknown as Book
           if (t === 'books' && lb && (lb.readPagesSetAt ?? 0) > (rb.readPagesSetAt ?? 0)) {
@@ -465,7 +484,11 @@ export function startSync() {
   window.addEventListener('offline', () => set({ status: 'offline' }))
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') scheduleSync(800)
+    // Leaving the app (switching window, locking the tablet, closing): send
+    // everything now rather than in a few seconds that may never come.
+    else void syncNow()
   })
+  window.addEventListener('pagehide', () => void syncNow())
   setInterval(() => {
     if (document.visibilityState === 'visible') scheduleSync(0)
   }, 60_000)

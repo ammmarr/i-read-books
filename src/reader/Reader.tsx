@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
+  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, MonitorSmartphone, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect } from '../db/db'
 import { setStatus } from '../db/books'
@@ -26,7 +26,7 @@ import { SearchPanel } from './SearchPanel'
 import { useReadingSession } from './useReadingSession'
 import { useImporter } from '../components/Importer'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
-import { downloadBookFile } from '../lib/sync'
+import { downloadBookFile, syncNow } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
 import { isNative, keepScreenOn, setImmersive } from '../lib/native'
 
@@ -51,6 +51,19 @@ export default function Reader() {
   const [download, setDownload] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [detail, setDetail] = useState<string | null>(null)
+  // Before opening, give sync a moment to bring in where you left off on
+  // another device — so the book opens there, not at this device's older spot.
+  const [fresh, setFresh] = useState(() => !cloudEnabled || !getAuthSession() || !navigator.onLine)
+  useEffect(() => {
+    if (fresh) return
+    let done = false
+    const finish = () => {
+      if (!done) (done = true), setFresh(true)
+    }
+    void syncNow().finally(finish)
+    const t = setTimeout(finish, 1500)
+    return () => clearTimeout(t)
+  }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   const hasPdf = book ? book.pageCount > 0 : undefined
 
   useEffect(() => {
@@ -143,7 +156,7 @@ export default function Reader() {
         }
       />
     )
-  if (!book || !doc) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} />
+  if (!book || !doc || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} />
   return <ReaderView key={book.id} book={book} doc={doc} />
 }
 
@@ -316,12 +329,19 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
 
   // ── Restore position once ─────────────────────────────────────────────
   const restored = useRef(false)
+  /** You scrolled/jumped since the last save (vs. restore/zoom moving the view). */
+  const moved = useRef(false)
+  const posQuietUntil = useRef(0)
+  /** Timestamp of the position this device last saved or adopted. */
+  const myPositionAt = useRef(book.positionAt ?? 0)
   useLayoutEffect(() => {
     const el = scroller.current
     // Wait for the measured viewport so the restored offset matches the real layout.
     if (!el || restored.current || vp.h < 10 || Math.abs(el.clientWidth - vp.w) > 1) return
     restored.current = true
     const i = Math.min(book.currentPage, layout.tops.length - 1)
+    // Putting you back where you were isn't you moving — don't re-save it.
+    posQuietUntil.current = performance.now() + 800
     el.scrollTop = layout.tops[i] + book.pageOffset * layout.heights[i] - 16
     el.scrollLeft = (layout.contentW - vp.w) / 2
   }, [layout, vp, book.currentPage, book.pageOffset])
@@ -356,6 +376,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     if (!el || !a) return
     anchor.current = null
     scrollState.current.quietUntil = performance.now() + 300
+    posQuietUntil.current = performance.now() + 400
     el.scrollTop = layout.tops[a.idx] + a.frac * layout.heights[a.idx] - a.ay
     el.scrollLeft = a.fx * layout.contentW - a.ax
   }, [layout])
@@ -452,12 +473,17 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const persist = useCallback(() => {
     const el = scroller.current
-    if (!el) return
+    // Only save a position you actually moved to; restoring or zooming doesn't
+    // count, so a device showing an older spot can't overwrite a newer one.
+    if (!el || !moved.current) return
+    moved.current = false
     const L = layoutRef.current
     const cp = pageAt(el.scrollTop + el.clientHeight * 0.4)
     const offset = (el.scrollTop + 16 - L.tops[cp]) / L.heights[cp]
+    const at = Date.now()
+    myPositionAt.current = at
     // Where you are, not how far you've read — progress comes from pages read.
-    db.books.update(book.id, { currentPage: cp, pageOffset: offset, lastOpenedAt: Date.now() })
+    return db.books.update(book.id, { currentPage: cp, pageOffset: offset, positionAt: at, lastOpenedAt: at })
   }, [book.id, pageAt])
 
   const onScroll = useCallback(() => {
@@ -487,9 +513,31 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     if (st < 40 || s.up > 36) setChrome(true)
     else if (s.down > 90 && !lockRef.current) setChrome(false)
 
+    if (performance.now() > posQuietUntil.current) moved.current = true
     clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(persist, 500)
   }, [pageAt, persist])
+
+  // Switching window, locking the tablet or closing: save and send right away.
+  useEffect(() => {
+    const onHide = () => {
+      if (document.visibilityState !== 'hidden') return
+      clearTimeout(saveTimer.current)
+      void Promise.resolve(persist()).then(() => syncNow())
+    }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [persist])
+
+  // Another device moved ahead while this book is open: offer to jump there
+  // rather than yanking the page away mid-sentence.
+  const [elsewhere, setElsewhere] = useState<{ page: number; offset: number } | null>(null)
+  useEffect(() => {
+    const at = book.positionAt ?? 0
+    if (at <= myPositionAt.current) return
+    myPositionAt.current = at
+    if (Math.abs(book.currentPage - currentPageRef.current) >= 1) setElsewhere({ page: book.currentPage, offset: book.pageOffset })
+  }, [book.positionAt]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => () => {
     clearTimeout(saveTimer.current)
@@ -1272,6 +1320,38 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
               )}
             </div>
           </motion.footer>
+        )}
+      </AnimatePresence>
+
+      {/* Newer position from another device */}
+      <AnimatePresence>
+        {elsewhere && !linkReturn && (
+          <motion.div
+            key="elsewhere"
+            initial={{ opacity: 0, y: 16, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 10, scale: 0.97 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+            className={`absolute left-1/2 z-40 flex -translate-x-1/2 items-center rounded-full border border-hairline bg-canvas-elevated pl-1 shadow-floating ${
+              chrome ? 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+80px)]' : 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+20px)]'
+            } transition-[bottom] duration-300`}
+          >
+            <button
+              onClick={() => {
+                const e = elsewhere
+                setElsewhere(null)
+                scrollToPage(e.page, { frac: e.offset })
+              }}
+              className="flex h-10 items-center gap-2 rounded-full px-3 text-label-sm text-ink hover:bg-hairline-soft"
+            >
+              <MonitorSmartphone className="size-4 text-link" />
+              Continue from page {elsewhere.page + 1}
+              <span className="font-normal text-mute">· read on another device</span>
+            </button>
+            <button onClick={() => setElsewhere(null)} aria-label="Stay here" className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
+              <XIcon className="size-3.5" />
+            </button>
+          </motion.div>
         )}
       </AnimatePresence>
 

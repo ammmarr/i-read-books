@@ -35,6 +35,12 @@ export interface Book extends Synced {
   currentPage: number
   /** Fraction scrolled into the current page, to restore exactly. */
   pageOffset: number
+  /**
+   * When you last moved in this book (ms) — scrolling, turning pages, jumping.
+   * Opening, restoring or zooming don't count. Across devices the newest wins,
+   * independently of other edits to the book.
+   */
+  positionAt?: number
   /** Furthest page (0-based) actually read (max of readPages). */
   furthestPage: number
   /** Pages actually read (dwelled on), as compact ranges "0-12,15". Progress comes from this. */

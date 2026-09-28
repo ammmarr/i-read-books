@@ -34,6 +34,7 @@ create table if not exists public.irb_books (
   last_opened_at  bigint,
   current_page    int,
   page_offset     double precision,
+  position_at     bigint,
   furthest_page   int,
   read_pages      text,
   read_pages_set_at bigint,
@@ -100,6 +101,7 @@ create table if not exists public.irb_profiles (
 -- (for projects created before read_pages existed)
 alter table public.irb_books add column if not exists read_pages text;
 alter table public.irb_books add column if not exists read_pages_set_at bigint;
+alter table public.irb_books add column if not exists position_at bigint;
 
 -- ── triggers, indexes, row-level security (only you can see your rows)
 do $$
@@ -126,6 +128,13 @@ begin
     new.read_pages := old.read_pages;
     new.read_pages_set_at := old.read_pages_set_at;
     new.furthest_page := old.furthest_page;
+  end if;
+  -- Reading position: the device that moved most recently wins, even if
+  -- another device saved some other change to the book afterwards.
+  if old.position_at is not null and (new.position_at is null or new.position_at < old.position_at) then
+    new.current_page := old.current_page;
+    new.page_offset := old.page_offset;
+    new.position_at := old.position_at;
   end if;
   return new;
 end $$;
