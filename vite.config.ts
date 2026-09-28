@@ -26,10 +26,20 @@ export default defineConfig({
         description: 'A calm, private PDF reader with highlights and reading analytics.',
         theme_color: '#fafafa',
         background_color: '#fafafa',
+        id: './',
         display: 'standalone',
         orientation: 'any',
         start_url: './',
         scope: './',
+        categories: ['books', 'education', 'productivity'],
+        // Installed on a PC: "Open with → I read" for PDFs (Chromium browsers).
+        file_handlers: [{ action: './', accept: { 'application/pdf': ['.pdf'] } }],
+        launch_handler: { client_mode: 'focus-existing' },
+        shortcuts: [
+          { name: 'Library', url: './#/', icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }] },
+          { name: 'Reading list', url: './#/list', icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }] },
+          { name: 'Insights', url: './#/stats', icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }] },
+        ],
         icons: [
           { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },

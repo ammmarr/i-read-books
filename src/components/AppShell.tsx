@@ -17,6 +17,7 @@ import { dailyTotals, streaks } from "../lib/stats";
 import { setTheme, useIsDark } from "../lib/theme";
 import { useImporter } from "./Importer";
 import { SyncIndicator } from "./AccountSync";
+import { InstallButton } from "./InstallButton";
 import { Button, IconButton } from "./ui/Button";
 
 const NAV = [
@@ -125,6 +126,7 @@ export function AppShell() {
             })}
           </nav>
           <div className="ml-auto flex items-center gap-1.5">
+            <InstallButton />
             <StreakChip />
             <SyncIndicator />
             <ThemeToggle />

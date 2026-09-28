@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { AnimatePresence, motion } from 'motion/react'
 import { FileUp } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { DuplicateBookError, importPdf } from '../db/books'
+import { addAnalyzedPdf, analyzePdf, DuplicateBookError, importPdf } from '../db/books'
 import { importReadingList, readListCsv } from '../lib/readingList'
 import { useToast } from './ui/Toast'
 import { AddBookSheet, type AddTab } from './AddBook'
@@ -127,12 +127,40 @@ export function ImportProvider({ children }: { children: ReactNode }) {
     [toast, dismiss, navigate, importList],
   )
 
-  // PDFs opened from other Android apps.
+  // PDFs opened from outside the app — Windows/macOS "Open with I read"
+  // (installed web app) or Android "Open with": straight into the reader.
+  const openDirect = useCallback(
+    async (files: File[]) => {
+      const pdfs = files.filter(isPdf)
+      if (!pdfs.length) return
+      toast({ id: 'open-file', tone: 'info', duration: Infinity, message: 'Opening…', description: pdfs[0].name })
+      try {
+        let first: string | undefined
+        for (const f of pdfs) {
+          const a = await analyzePdf(f)
+          const id = a.duplicate ? a.duplicate.id : (await addAnalyzedPdf(a, { status: 'reading' })).book.id
+          first ??= id
+        }
+        dismiss('open-file')
+        if (first) navigate(`/read/${first}`)
+        if (pdfs.length > 1) toast({ message: `${pdfs.length} books opened`, description: 'The rest are in your library.' })
+      } catch (e) {
+        console.error(e)
+        toast({ id: 'open-file', tone: 'error', message: 'Couldn’t open that PDF', description: 'It may be damaged or password-protected.' })
+      }
+    },
+    [toast, dismiss, navigate],
+  )
   useEffect(() => {
-    const onOpen = (e: Event) => review([(e as CustomEvent<File>).detail])
+    const onOpen = (e: Event) => void openDirect([(e as CustomEvent<File>).detail])
     window.addEventListener('irb-open-file', onOpen)
+    const lq = (window as unknown as { launchQueue?: { setConsumer: (fn: (p: { files: { getFile: () => Promise<File> }[] }) => void) => void } }).launchQueue
+    lq?.setConsumer(async (params) => {
+      if (!params.files?.length) return
+      void openDirect(await Promise.all(params.files.map((h) => h.getFile())))
+    })
     return () => window.removeEventListener('irb-open-file', onOpen)
-  }, [review])
+  }, [openDirect])
 
   // Drag & drop anywhere in the window.
   useEffect(() => {

@@ -109,7 +109,7 @@ export default function SettingsPage() {
       </Group>
 
       {(available || !isStandalone()) && (
-        <Group title="Install" desc="Install I read to open it like a normal app — full screen, from your home screen or taskbar, and fully offline.">
+        <Group title="Install" desc="Install I read to use it like a normal app — its own window, Start menu and taskbar on a PC (with “Open with I read” for PDFs), or your home screen on a tablet. Works fully offline.">
           {available ? (
             <Button onClick={async () => (await install()) && toast({ message: 'Installed', description: 'Find I read on your home screen.' })}>
               <MonitorSmartphone className="size-4" /> Install app
