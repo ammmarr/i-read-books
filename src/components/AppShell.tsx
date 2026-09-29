@@ -96,7 +96,7 @@ export function AppShell() {
   return (
     <div className="flex min-h-full flex-col">
       <header className="safe-top sticky top-0 z-40 border-b border-hairline bg-canvas/85 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-2 px-4 md:h-16 md:px-6">
+        <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-2 px-4 md:h-16 md:px-6 touch:max-w-none">
           <nav className="hidden items-center gap-1 md:flex">
             {NAV.map((n) => {
               const active =
@@ -229,7 +229,7 @@ export function PageContainer({
 }) {
   return (
     <main
-      className={`mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-10 ${className}`}
+      className={`mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-10 ${className} touch:max-w-none md:touch:px-8`}
     >
       {children}
     </main>

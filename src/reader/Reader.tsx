@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, MonitorSmartphone, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
+  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect } from '../db/db'
 import { setStatus } from '../db/books'
@@ -286,15 +286,19 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
 
   const sizes = book.pageSizes.length === book.pageCount ? book.pageSizes : Array.from({ length: doc.numPages }, () => book.pageSizes[0] ?? { w: 612, h: 792 })
   const maxW = useMemo(() => Math.max(...sizes.map((s) => s.w)), [sizes])
-  const pad = mobile ? 6 : 24
+  // "Fit width" really fills the screen, edge to edge (PDFs carry their own
+  // margins); the other modes keep a little breathing room around the page.
+  const basePad = mobile ? 6 : 24
+  const pad = view.mode === 'width' ? 2 : basePad
   const gap = mobile ? 8 : 16
 
   const fit = useMemo(() => {
     const ref = sizes[0]
-    const width = (vp.w - pad * 2) / maxW
-    const page = Math.min(width, (vp.h - 32) / ref.h)
-    return { width, page, auto: Math.min(width, 1.35 * PT_TO_PX) }
-  }, [vp.w, vp.h, pad, maxW, sizes])
+    const padded = (vp.w - basePad * 2) / maxW
+    const width = (vp.w - 4) / maxW
+    const page = Math.min(padded, (vp.h - 32) / ref.h)
+    return { width, page, auto: Math.min(padded, 1.35 * PT_TO_PX) }
+  }, [vp.w, vp.h, basePad, maxW, sizes])
 
   const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, view.mode === 'custom' ? view.zoom : fit[view.mode]))
 
@@ -389,6 +393,11 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     },
     [scale, zoomTo],
   )
+
+  /** Fill the screen width with the page — or go back to the comfortable default. */
+  const toggleFitWidth = useCallback(() => {
+    zoomTo(view.mode === 'width' ? { mode: 'auto', zoom: scale } : { mode: 'width', zoom: scale })
+  }, [view.mode, scale, zoomTo])
 
   // Ctrl/⌘ + wheel and trackpad pinch (which browsers report as ctrl+wheel).
   useEffect(() => {
@@ -1044,9 +1053,16 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
       const t = e.target
       const typing = t instanceof Element && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"] button')
       const mod = e.ctrlKey || e.metaKey
-      if (mod && e.key.toLowerCase() === 'f') {
+      // Ctrl+F: fit the page to the screen width (again to undo).
+      // Search lives on "/" and Ctrl+Shift+F.
+      if (mod && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault()
         setSearchOpen(true)
+        return
+      }
+      if (mod && e.key.toLowerCase() === 'f') {
+        e.preventDefault()
+        toggleFitWidth()
         return
       }
       if (mod && (e.key === '=' || e.key === '+')) return void (e.preventDefault(), stepZoom(1))
@@ -1135,7 +1151,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [stepZoom, zoomTo, scale, currentPage, scrollToPage, toggleBookmark, selAnchor, createHighlight, searchOpen, closeSearch, book.pageCount])
+  }, [stepZoom, zoomTo, scale, currentPage, scrollToPage, toggleBookmark, selAnchor, createHighlight, searchOpen, closeSearch, book.pageCount, toggleFitWidth])
 
   // ── Render ────────────────────────────────────────────────────────────
   const pageTheme = settings.pageTheme === 'auto' ? (dark ? 'night' : 'paper') : settings.pageTheme
@@ -1231,7 +1247,15 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
                   {formatDuration(sessionSeconds)}
                 </div>
               )}
-              <IconButton label="Search (Ctrl+F)" tipBelow active={searchOpen} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}>
+              <IconButton
+                label={view.mode === 'width' ? 'Back to normal width (Ctrl+F)' : 'Fit to width (Ctrl+F)'}
+                tipBelow
+                active={view.mode === 'width'}
+                onClick={toggleFitWidth}
+              >
+                {view.mode === 'width' ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />}
+              </IconButton>
+              <IconButton label="Search (/)" tipBelow active={searchOpen} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}>
                 <Search className="size-[18px]" />
               </IconButton>
               <IconButton label={bookmarked ? 'Remove bookmark (B)' : 'Bookmark page (B)'} tipBelow onClick={toggleBookmark}>
@@ -1559,7 +1583,8 @@ function GoToPage({ page, count, onGo, progress }: { page: number; count: number
 }
 
 const SHORTCUTS: [string, string][] = [
-  ['Ctrl F  or  /', 'Search in book'],
+  ['Ctrl F', 'Fit page to screen width (again to undo)'],
+  ['/  ·  Ctrl Shift F', 'Search in book'],
   ['← →', 'Previous / next page'],
   ['Space  ·  Shift Space', 'Scroll a screen'],
   ['J  K', 'Scroll a little'],

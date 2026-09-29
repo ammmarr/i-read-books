@@ -4,6 +4,8 @@
 @import './styles/textlayer.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
+/* Touch-first devices (tablets, phones): layouts go full-width like native apps. */
+@custom-variant touch (@media (pointer: coarse));
 
 /* ───────────────────────── Geist design tokens ─────────────────────────
    Names match the design system doc exactly: `--color-ink` is literally
