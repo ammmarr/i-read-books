@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
+  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, NotebookPen, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
@@ -732,16 +732,23 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const writerOpen = useRef(false)
   writerOpen.current = !!writer
   const recapOffered = useRef(new Set<number>())
+  /**
+   * The first check runs where you left off: the chapter you finished last
+   * time is offered too — even if you read it before recaps existed.
+   */
+  const firstCheck = useRef(true)
 
   useEffect(() => {
     if (!recapsOn || !chapters.length || !recapsQ || writer) return
+    const atOpen = firstCheck.current
+    firstCheck.current = false
     const read = readSet.current
     const c = lastFinishedChapter(chapters, currentPage, read)
     if (!c || recapOffered.current.has(c.start)) return
     const existing = recapsQ.find((r) => r.start === c.start)
     if (existing && existing.state !== 'due') return
     if (!existing) {
-      let fresh = false
+      let fresh = atOpen
       for (let p = c.start; p <= c.end && !fresh; p++) fresh = sessionRead.current.has(p)
       if (!fresh || c.end - c.start + 1 < MIN_RECAP_PAGES || coverage(c, read) < RECAP_COVERAGE) return
       void markRecapDue(book.id, c)
@@ -1315,6 +1322,9 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
                   {formatDuration(sessionSeconds)}
                 </div>
               )}
+              <IconButton label="Recap this chapter (R)" tipBelow className="hidden sm:inline-flex" onClick={recapHere}>
+                <NotebookPen className="size-[18px]" />
+              </IconButton>
               <IconButton
                 label={view.mode === 'width' ? 'Back to normal width (Ctrl+F)' : 'Fit to width (Ctrl+F)'}
                 tipBelow

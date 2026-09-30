@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Bookmark as BookmarkIcon, BookmarkPlus, ChevronRight, Copy, Highlighter, ListTree, NotebookPen, X } from 'lucide-react'
 import type { Book, Bookmark, Highlight, HighlightColor, Recap } from '../db/db'
-import type { Chapter } from '../lib/recaps'
+import { coverage, MIN_RECAP_PAGES, RECAP_COVERAGE, type Chapter } from '../lib/recaps'
+import { readPagesOf } from '../lib/pages'
 import type { OutlineItem } from '../lib/pdf'
 import { Sheet } from '../components/ui/Sheet'
 import { Segmented } from '../components/ui/Segmented'
@@ -110,12 +111,17 @@ function Contents({ outline, currentPage, onJump, chapterTitle, book, chapters, 
         </div>
       </Empty>
     )
-  // Chapters (as recaps see them) matched by where they start and their title.
+  // Chapters (as recaps see them) matched by where they start and their title:
+  // written, waiting, or read and ready for one.
+  const read = readPagesOf(book)
   const recapOf: RecapOf = (it) => {
     const c = it.page != null ? chapters.find((ch) => ch.start === it.page && ch.title === cleanTitle(it.title)) : undefined
     if (!c) return undefined
     const r = recaps.find((x) => x.start === c.start)
-    return r && r.state !== 'skipped' ? { recap: r, open: () => onRecap(c) } : undefined
+    const open = () => onRecap(c)
+    if (r?.state === 'done' || r?.state === 'due') return { state: r.state, open }
+    if (!r && c.end - c.start + 1 >= MIN_RECAP_PAGES && coverage(c, read) >= RECAP_COVERAGE) return { state: 'ready', open }
+    return undefined
   }
   return (
     <>
@@ -129,7 +135,7 @@ function Contents({ outline, currentPage, onJump, chapterTitle, book, chapters, 
   )
 }
 
-type RecapOf = (it: OutlineItem) => { recap: Recap; open: () => void } | undefined
+type RecapOf = (it: OutlineItem) => { state: 'done' | 'due' | 'ready'; open: () => void } | undefined
 
 function OutlineNode({
   item, depth, currentPage, onJump, chapterTitle, recapOf,
@@ -172,16 +178,24 @@ function OutlineNode({
           </span>
           {item.page != null && <span className="shrink-0 text-body-sm tabular text-faint">{item.page + 1}</span>}
         </button>
-        {rc && (
+        {rc?.state === 'ready' ? (
           <button
             onClick={rc.open}
-            aria-label={rc.recap.state === 'done' ? 'Your recap' : 'Recap waiting'}
-            title={rc.recap.state === 'done' ? 'Your recap' : 'Recap waiting'}
+            title="You've read this chapter — recall it"
+            className="-ml-1 mr-1 h-7 shrink-0 rounded-full border border-hairline px-2.5 text-body-sm font-medium text-link transition-colors hover:bg-hairline"
+          >
+            Recap
+          </button>
+        ) : rc ? (
+          <button
+            onClick={rc.open}
+            aria-label={rc.state === 'done' ? 'Your recap' : 'Recap waiting'}
+            title={rc.state === 'done' ? 'Your recap' : 'Recap waiting'}
             className="-ml-2 mr-1 grid size-8 shrink-0 place-items-center rounded-full hover:bg-hairline"
           >
-            {rc.recap.state === 'done' ? <NotebookPen className="size-3.5 text-link" /> : <span className="size-2 rounded-full bg-warning" />}
+            {rc.state === 'done' ? <NotebookPen className="size-3.5 text-link" /> : <span className="size-2 rounded-full bg-warning" />}
           </button>
-        )}
+        ) : null}
       </div>
       <AnimatePresence initial={false}>
         {open && item.items.length > 0 && (

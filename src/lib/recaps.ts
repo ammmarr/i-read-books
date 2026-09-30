@@ -60,14 +60,14 @@ export interface Chapter {
 
 /** Front and back matter — not chapters you'd recap. */
 const MATTER =
-  /^(cover|title( page)?|half[- ]title|copyright( page)?|(table of )?contents|dedication|epigraph|acknowledge?ments?|about the (authors?|publisher)|about this book|also by\b.*|praise for\b.*|books by\b.*|other books\b.*|index|notes|endnotes|bibliography|references|sources|further reading|recommended reading|glossary|credits|colophon|permissions|list of (figures|tables|illustrations)|frontispiece|back cover|newsletter\b.*|sign up\b.*|appendix\b.*|appendices)$/i
+  /^(cover|title( page)?|half[- ]title|copyright( page)?|(table of )?contents|dedication|epigraph|acknowledge?ments?|about the (authors?|publisher)|about this book|key terms|(a )?note to (the )?readers?|also by\b.*|praise for\b.*|books by\b.*|other books\b.*|index|notes|endnotes|bibliography|references|sources|further reading|recommended reading|glossary|credits|colophon|permissions|list of (figures|tables|illustrations)|frontispiece|back cover|newsletter\b.*|sign up\b.*|appendix\b.*|appendices)$/i
 const PART = /^(part|book|section|volume)\s+([\divxlc]+|one|two|three|four|five|six|seven|eight|nine|ten)\b/i
 
 const clean = (t: string) => t.replace(/\s+/g, ' ').trim()
 const isMatter = (t: string) => MATTER.test(clean(t).replace(/^[\divxlc]+[.):\s-]+/i, '').replace(/[.:]$/, ''))
 
 /** Chapters shorter than this don't prompt a recap by themselves (you can still write one). */
-export const MIN_RECAP_PAGES = 3
+export const MIN_RECAP_PAGES = 5
 /** Share of a chapter's pages you must have actually read before it asks. */
 export const RECAP_COVERAGE = 0.75
 
