@@ -91,6 +91,24 @@ create table if not exists public.irb_sessions (
   deleted     boolean not null default false
 );
 
+-- chapter recaps: your three answers after each chapter (id = "{book_id}:{first page}")
+create table if not exists public.irb_recaps (
+  id          text primary key,
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  book_id     uuid,
+  start_page  int,
+  end_page    int,
+  chapter     text,
+  sections    jsonb,
+  answers     jsonb,
+  state       text,
+  created_at  bigint,
+  reviewed_at bigint,
+  updated_at  bigint not null,
+  server_ts   bigint,
+  deleted     boolean not null default false
+);
+
 create table if not exists public.irb_profiles (
   user_id     uuid primary key default auth.uid() references auth.users on delete cascade,
   settings    jsonb,
@@ -107,7 +125,7 @@ alter table public.irb_books add column if not exists position_at bigint;
 do $$
 declare t text;
 begin
-  foreach t in array array['irb_books', 'irb_highlights', 'irb_bookmarks', 'irb_sessions', 'irb_profiles'] loop
+  foreach t in array array['irb_books', 'irb_highlights', 'irb_bookmarks', 'irb_sessions', 'irb_recaps', 'irb_profiles'] loop
     execute format('drop trigger if exists %1$s_touch on public.%1$s', t);
     execute format('create trigger %1$s_touch before insert or update on public.%1$s for each row execute function public.irb_touch()', t);
     execute format('create index if not exists %1$s_user_ts on public.%1$s (user_id, server_ts)', t);
@@ -141,6 +159,24 @@ end $$;
 drop trigger if exists irb_books_manual_progress on public.irb_books;
 create trigger irb_books_manual_progress before update on public.irb_books
   for each row execute function public.irb_books_keep_manual_progress();
+
+-- ── a written recap is never wiped out by a device that only noted the
+-- chapter as finished (or skipped it) before it had synced your answers
+create or replace function public.irb_recaps_keep_answers() returns trigger
+language plpgsql as $$
+begin
+  if not new.deleted
+     and coalesce(new.answers, '{}'::jsonb) = '{}'::jsonb
+     and coalesce(old.answers, '{}'::jsonb) <> '{}'::jsonb then
+    new.answers := old.answers;
+    new.state := old.state;
+    new.reviewed_at := old.reviewed_at;
+  end if;
+  return new;
+end $$;
+drop trigger if exists irb_recaps_keep_answers on public.irb_recaps;
+create trigger irb_recaps_keep_answers before update on public.irb_recaps
+  for each row execute function public.irb_recaps_keep_answers();
 
 -- ── storage: one private bucket, one folder per user  ({user_id}/{book_id}.pdf|.jpg)
 insert into storage.buckets (id, name, public)

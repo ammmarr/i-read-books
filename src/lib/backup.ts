@@ -1,4 +1,4 @@
-import { db, type Book, type Bookmark, type Highlight, type Session } from '../db/db'
+import { db, type Book, type Bookmark, type Highlight, type Recap, type Session } from '../db/db'
 import { isNative, shareTextFile } from './native'
 import { formatPages, readPagesOf } from './pages'
 
@@ -10,6 +10,8 @@ interface BackupFile {
   highlights: Highlight[]
   bookmarks: Bookmark[]
   sessions: Session[]
+  /** Chapter recaps (added later — older backups don't have them). */
+  recaps?: Recap[]
   settings: string | null
 }
 
@@ -24,6 +26,7 @@ export async function exportBackup() {
     highlights: await db.highlights.toArray(),
     bookmarks: await db.bookmarks.toArray(),
     sessions: await db.sessions.toArray(),
+    recaps: await db.recaps.toArray(),
     settings: (() => {
       try { return localStorage.getItem('irb-settings') } catch { return null }
     })(),
@@ -71,10 +74,16 @@ export async function importBackup(file: File) {
   const hl = remap(data.highlights)
   const bm = remap(data.bookmarks)
   const ss = remap(data.sessions)
-  await db.transaction('rw', db.highlights, db.bookmarks, db.sessions, async () => {
+  const rc = remap(data.recaps ?? [])
+  await db.transaction('rw', db.highlights, db.bookmarks, db.sessions, db.recaps, async () => {
     await db.highlights.bulkPut(hl)
     await db.bookmarks.bulkPut(bm)
     await db.sessions.bulkPut(ss)
+    // One recap per chapter: an imported one replaces the local one for that chapter.
+    for (const r of rc) {
+      const existing = await db.recaps.where('[bookId+start]').equals([r.bookId, r.start]).first()
+      await db.recaps.put(existing ? { ...r, id: existing.id } : r)
+    }
   })
-  return { matched: idMap.size, missing, highlights: hl.length, sessions: ss.length }
+  return { matched: idMap.size, missing, highlights: hl.length, sessions: ss.length, recaps: rc.length }
 }

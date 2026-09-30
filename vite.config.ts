@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { buildId, nativeFingerprint } from './scripts/build-info.mjs'
 
 // Relative base so the build works from any static host sub-path
 // (GitHub Pages, Netlify, a Capacitor WebView, …).
@@ -9,15 +10,30 @@ import { VitePWA } from 'vite-plugin-pwa'
 // CI sets APP_VERSION (matches the APK); Vercel builds fall back to the commit.
 const appVersion =
   process.env.APP_VERSION ?? (process.env.VERCEL_GIT_COMMIT_SHA ? `web ${process.env.VERCEL_GIT_COMMIT_SHA.slice(0, 7)}` : 'dev')
+// For "Update" inside the app: which build this is, when it was made, and
+// which native app it can run in (see scripts/build-info.mjs).
+const builtAt = Date.now()
 
 export default defineConfig({
   base: './',
-  define: { __APP_VERSION__: JSON.stringify(appVersion) },
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_BUILD__: JSON.stringify(buildId()),
+    __BUILT_AT__: String(builtAt),
+    __NATIVE_FP__: JSON.stringify(nativeFingerprint()),
+  },
   plugins: [
     react(),
+    {
+      name: 'build-time',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'build-time.txt', source: String(builtAt) })
+      },
+    },
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // New versions wait for you to press "Update" (see src/lib/update.ts).
+      registerType: 'prompt',
       injectRegister: false,
       includeAssets: ['favicon.png', 'apple-touch-icon-180x180.png'],
       manifest: {

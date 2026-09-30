@@ -14,11 +14,14 @@ import { formatBytes } from '../lib/format'
 import { AccountSync } from '../components/AccountSync'
 import { useImporter } from '../components/Importer'
 import { cloudEnabled } from '../lib/supabase'
+import { setRecapsEnabled, useRecapPrefs } from '../lib/recaps'
+import { applyUpdate, checkForUpdate, useUpdate, versionLabel } from '../lib/update'
 
 const GOALS = [10, 15, 20, 30, 45, 60]
 
 export default function SettingsPage() {
   const s = useSettings()
+  const recap = useRecapPrefs()
   const { toast } = useToast()
   const { available, install } = useInstallPrompt()
   const [storage, setStorage] = useState<{ usage: number; quota: number; persisted: boolean } | null>(null)
@@ -106,6 +109,12 @@ export default function SettingsPage() {
         <Toggle label="Hide controls while reading" hint="Scroll up or tap the page to bring them back" checked={s.autoHideChrome} onChange={(v) => updateSettings({ autoHideChrome: v })} />
         <Toggle label="Keep screen on" hint="Stops your tablet from dimming mid-chapter" checked={s.keepAwake} onChange={(v) => updateSettings({ keepAwake: v })} />
         <Toggle label="Show session timer" hint="A small clock in the reader’s top bar" checked={s.showSessionTimer} onChange={(v) => updateSettings({ showSessionTimer: v })} />
+        <Toggle
+          label="Chapter recaps"
+          hint="After each chapter, recall it with three quick questions. Your answers are kept on each book’s page, on all your devices."
+          checked={recap.enabled}
+          onChange={setRecapsEnabled}
+        />
       </Group>
 
       {(available || !isStandalone()) && (
@@ -204,10 +213,42 @@ export default function SettingsPage() {
         </p>
       </Group>
 
-      <p className="mt-10 text-center text-body-sm text-faint">
-        I read · version {__APP_VERSION__} · made for one reader
-      </p>
+      <VersionFooter />
     </PageContainer>
+  )
+}
+
+/** Which version you're on, and a way to look for a newer one. */
+function VersionFooter() {
+  const { toast } = useToast()
+  const u = useUpdate()
+  const [label, setLabel] = useState(__APP_VERSION__)
+  const [checking, setChecking] = useState(false)
+  useEffect(() => {
+    void versionLabel().then(setLabel)
+  }, [])
+  return (
+    <div className="mt-10 flex flex-col items-center gap-1 text-center text-body-sm text-faint">
+      <p>I read · version {label} · made for one reader</p>
+      {u.available ? (
+        <button onClick={() => void applyUpdate()} className="font-medium text-link hover:underline">
+          {u.available === 'app' ? 'Download the new app' : 'Update to the new version'}
+        </button>
+      ) : (
+        <button
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true)
+            const found = await checkForUpdate()
+            setChecking(false)
+            if (!found) toast({ message: 'You’re up to date', description: 'This is the latest version of I read.' })
+          }}
+          className="text-body hover:text-ink hover:underline disabled:opacity-60"
+        >
+          {checking ? 'Checking…' : 'Check for updates'}
+        </button>
+      )}
+    </div>
   )
 }
 

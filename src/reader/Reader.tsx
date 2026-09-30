@@ -5,7 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import {
   ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
 } from 'lucide-react'
-import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect } from '../db/db'
+import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
 import { closePdf, flattenOutline, openPdfBlob, readOutline, resolveDest, type OutlineItem, type PDFDocumentProxy, type PdfLink } from '../lib/pdf'
 import { loadBookView, saveBookView, useSettings, type ZoomMode } from '../lib/settings'
@@ -29,6 +29,9 @@ import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { downloadBookFile, syncNow } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
 import { isNative, keepScreenOn, setImmersive } from '../lib/native'
+import { chapterForRecap, chaptersOf, coverage, lastFinishedChapter, markRecapDue, MIN_RECAP_PAGES, pagesChapter, RECAP_COVERAGE, setBookRecaps, useRecapPrefs, type Chapter } from '../lib/recaps'
+import { RecapWriter } from '../components/recap/RecapWriter'
+import { RecapPromptCard } from '../components/recap/RecapPrompt'
 
 const PT_TO_PX = 96 / 72
 const MIN_SCALE = 0.25
@@ -40,6 +43,7 @@ const BOTTOM_PAD = 96
 const NO_HIGHLIGHTS: Highlight[] = []
 const NO_BOOKMARKS: Bookmark[] = []
 const NO_PAGE_HITS: PageHit[] = []
+const NO_RECAPS: Recap[] = []
 
 export default function Reader() {
   const { id } = useParams()
@@ -562,6 +566,8 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   // reading time. Jumping to page 200, scrubbing or flicking past pages
   // doesn't count, so progress reflects reading, not browsing.
   const readSet = useRef<Set<number>>(readPagesOf(book))
+  /** Pages that became "read" during this visit — only freshly finished chapters ask for a recap. */
+  const sessionRead = useRef(new Set<number>())
   const [readN, setReadN] = useState(() => readSet.current.size)
   const dwellCache = useRef(new Map<number, number>())
   const dwellFor = useCallback(
@@ -585,6 +591,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     (page: number) => {
       if (readSet.current.has(page)) return
       readSet.current.add(page)
+      sessionRead.current.add(page)
       setReadN(readSet.current.size)
       clearTimeout(readSaveTimer.current)
       readSaveTimer.current = setTimeout(() => {
@@ -710,6 +717,63 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     [flat],
   )
   const chapter = chapterFor(currentPage)
+
+  // ── Chapter recaps ────────────────────────────────────────────────────
+  // Finish a chapter (most of its pages actually read, this visit) and a card
+  // offers three recall questions. Nothing blocks reading; "Later" leaves the
+  // recap waiting on the book's page.
+  const chapters = useMemo(() => chaptersOf(outline, book.pageCount), [outline, book.pageCount])
+  const recapsQ = useLiveQuery(() => db.recaps.where('bookId').equals(book.id).toArray(), [book.id])
+  const recaps = recapsQ ?? NO_RECAPS
+  const recapPrefs = useRecapPrefs()
+  const recapsOn = recapPrefs.enabled && !recapPrefs.offBooks.includes(book.id)
+  const [recapPrompt, setRecapPrompt] = useState<{ chapter: Chapter; waiting: boolean } | null>(null)
+  const [writer, setWriter] = useState<{ chapter: Chapter; initial?: number | 'summary' } | null>(null)
+  const writerOpen = useRef(false)
+  writerOpen.current = !!writer
+  const recapOffered = useRef(new Set<number>())
+
+  useEffect(() => {
+    if (!recapsOn || !chapters.length || !recapsQ || writer) return
+    const read = readSet.current
+    const c = lastFinishedChapter(chapters, currentPage, read)
+    if (!c || recapOffered.current.has(c.start)) return
+    const existing = recapsQ.find((r) => r.start === c.start)
+    if (existing && existing.state !== 'due') return
+    if (!existing) {
+      let fresh = false
+      for (let p = c.start; p <= c.end && !fresh; p++) fresh = sessionRead.current.has(p)
+      if (!fresh || c.end - c.start + 1 < MIN_RECAP_PAGES || coverage(c, read) < RECAP_COVERAGE) return
+      void markRecapDue(book.id, c)
+    }
+    recapOffered.current.add(c.start)
+    setRecapPrompt({ chapter: c, waiting: !!existing })
+  }, [recapsOn, chapters, recapsQ, currentPage, readN, writer, book.id])
+
+  const openRecap = useCallback((c: Chapter, initial?: number | 'summary') => {
+    setRecapPrompt(null)
+    setSidebar((s) => ({ ...s, open: false }))
+    setWriter({ chapter: c, initial })
+  }, [])
+  /** Recap the chapter you're in (or the one you just left); without a table of contents, the pages since your last recap. */
+  const recapHere = useCallback(() => {
+    const c = chapters.length ? chapterForRecap(chapters, currentPage) : pagesChapter(recaps, currentPage)
+    if (c) openRecap(c)
+  }, [chapters, currentPage, recaps, openRecap])
+  const skipRecap = useCallback(
+    async (c: Chapter) => {
+      setRecapPrompt(null)
+      const r = await markRecapDue(book.id, c)
+      await db.recaps.update(r.id, { state: 'skipped', updatedAt: Date.now() })
+      toast({ message: 'Recap skipped', description: 'You can still write it from Contents.', action: { label: 'Undo', onClick: () => db.recaps.update(r.id, { state: 'due' }) } })
+    },
+    [book.id, toast],
+  )
+  const recapsOffForBook = useCallback(() => {
+    setRecapPrompt(null)
+    setBookRecaps(book.id, false)
+    toast({ message: 'No more recaps in this book', description: 'Press R any time to write one anyway.', action: { label: 'Undo', onClick: () => setBookRecaps(book.id, true) } })
+  }, [book.id, toast])
 
   // ── Bookmarks ─────────────────────────────────────────────────────────
   const bookmarked = bookmarks.some((b) => b.page === currentPage)
@@ -1050,6 +1114,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   // ── Keyboard ──────────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (writerOpen.current) return
       const t = e.target
       const typing = t instanceof Element && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"] button')
       const mod = e.ctrlKey || e.metaKey
@@ -1140,6 +1205,9 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         case '?':
           setShortcutsOpen(true)
           break
+        case 'r':
+          recapHere()
+          break
         case 'Escape':
           if (searchOpen) closeSearch()
           else if (selAnchor) {
@@ -1151,7 +1219,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [stepZoom, zoomTo, scale, currentPage, scrollToPage, toggleBookmark, selAnchor, createHighlight, searchOpen, closeSearch, book.pageCount, toggleFitWidth])
+  }, [stepZoom, zoomTo, scale, currentPage, scrollToPage, toggleBookmark, selAnchor, createHighlight, searchOpen, closeSearch, book.pageCount, toggleFitWidth, recapHere])
 
   // ── Render ────────────────────────────────────────────────────────────
   const pageTheme = settings.pageTheme === 'auto' ? (dark ? 'night' : 'paper') : settings.pageTheme
@@ -1403,6 +1471,25 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         )}
       </AnimatePresence>
 
+      {/* Chapter finished → recap (gone by itself if it gets written on another device) */}
+      <AnimatePresence>
+        {recapPrompt && !(mobile && (elsewhere || linkReturn)) && recaps.find((r) => r.start === recapPrompt.chapter.start)?.state === 'due' && (
+          <RecapPromptCard
+            key={recapPrompt.chapter.start}
+            chapter={recapPrompt.chapter}
+            waiting={recapPrompt.waiting}
+            className={`absolute left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0 transition-[bottom] duration-300 ${
+              chrome ? 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+80px)]' : 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+20px)]'
+            }`}
+            onStart={() => openRecap(recapPrompt.chapter)}
+            onLater={() => setRecapPrompt(null)}
+            onSkip={() => skipRecap(recapPrompt.chapter)}
+            onOffForBook={recapsOffForBook}
+          />
+        )}
+      </AnimatePresence>
+      <RecapWriter chapter={writer?.chapter ?? null} initial={writer?.initial} bookId={book.id} onClose={() => setWriter(null)} onJumpToHighlight={jumpToHighlight} />
+
       {/* Hairline progress that stays when the chrome hides. */}
       <AnimatePresence>
         {!chrome && (
@@ -1465,6 +1552,10 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         onDeleteBookmark={(b) => db.bookmarks.delete(b.id)}
         onCopyAll={copyAllHighlights}
         chapterFor={chapterFor}
+        chapters={chapters}
+        recaps={recaps}
+        recapTarget={chapters.length ? chapterForRecap(chapters, currentPage) : pagesChapter(recaps, currentPage)}
+        onRecap={(c) => openRecap(c)}
       />
       <ReaderSettings
         open={settingsOpen}
@@ -1594,6 +1685,7 @@ const SHORTCUTS: [string, string][] = [
   ['1 – 5', 'Highlight selection in a colour'],
   ['H', 'Highlight with last colour'],
   ['B', 'Bookmark page'],
+  ['R', 'Recap this chapter'],
   ['T  ·  N', 'Contents · Notes'],
   ['F', 'Full screen'],
   ['Esc', 'Close / toggle controls'],

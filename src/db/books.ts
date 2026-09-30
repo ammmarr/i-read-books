@@ -1,4 +1,4 @@
-import { db, uid, type Book, type BookStatus, type Bookmark, type Highlight, type Session, type BookFile, type PageSize } from './db'
+import { db, uid, type Book, type BookStatus, type Bookmark, type Highlight, type Recap, type Session, type BookFile, type PageSize } from './db'
 import { closePdf, getPageSizes, openPdf, readMetadata, renderCover } from '../lib/pdf'
 import { readCount } from '../lib/pages'
 
@@ -222,11 +222,12 @@ export interface BookSnapshot {
   highlights: Highlight[]
   bookmarks: Bookmark[]
   sessions: Session[]
+  recaps?: Recap[]
 }
 
 /** Deletes a book and everything attached to it, returning a snapshot for undo. */
 export async function deleteBook(id: string): Promise<BookSnapshot | null> {
-  return db.transaction('rw', [db.books, db.files, db.highlights, db.bookmarks, db.sessions], async () => {
+  return db.transaction('rw', [db.books, db.files, db.highlights, db.bookmarks, db.sessions, db.recaps], async () => {
     const book = await db.books.get(id)
     if (!book) return null
     const snap: BookSnapshot = {
@@ -235,24 +236,27 @@ export async function deleteBook(id: string): Promise<BookSnapshot | null> {
       highlights: await db.highlights.where('bookId').equals(id).toArray(),
       bookmarks: await db.bookmarks.where('bookId').equals(id).toArray(),
       sessions: await db.sessions.where('bookId').equals(id).toArray(),
+      recaps: await db.recaps.where('bookId').equals(id).toArray(),
     }
     await db.books.delete(id)
     await db.files.delete(id)
     await db.highlights.where('bookId').equals(id).delete()
     await db.bookmarks.where('bookId').equals(id).delete()
     await db.sessions.where('bookId').equals(id).delete()
+    await db.recaps.where('bookId').equals(id).delete()
     return snap
   })
 }
 
 export async function restoreBook(snap: BookSnapshot) {
-  await db.transaction('rw', [db.books, db.files, db.highlights, db.bookmarks, db.sessions], async () => {
+  await db.transaction('rw', [db.books, db.files, db.highlights, db.bookmarks, db.sessions, db.recaps], async () => {
     // The cloud copies may already be gone — upload them again.
     await db.books.put({ ...snap.book, filePath: snap.file ? undefined : snap.book.filePath, coverPath: undefined })
     if (snap.file) await db.files.put(snap.file)
     await db.highlights.bulkPut(snap.highlights)
     await db.bookmarks.bulkPut(snap.bookmarks)
     await db.sessions.bulkPut(snap.sessions)
+    if (snap.recaps) await db.recaps.bulkPut(snap.recaps)
   })
 }
 

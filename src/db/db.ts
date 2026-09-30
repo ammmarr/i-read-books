@@ -114,6 +114,32 @@ export interface Setting {
   value: unknown
 }
 
+export type RecapQuestion = 'learned' | 'example' | 'apply'
+
+/**
+ * Your recap of a chapter: three active-recall answers written after
+ * finishing it. One per chapter — the id is derived from the book and the
+ * chapter's first page, so every device writes to the same record.
+ */
+export interface Recap extends Synced {
+  id: string
+  bookId: string
+  /** First page of the chapter (0-based) — identifies the chapter within the book. */
+  start: number
+  /** Last page of the chapter (0-based, inclusive). */
+  end: number
+  chapter: string
+  /** Section titles inside the chapter, to check your recall against afterwards. */
+  sections?: string[]
+  answers: Partial<Record<RecapQuestion, string>>
+  /** due: chapter finished, recap not written yet · done: saved · skipped: you passed on it. */
+  state: 'due' | 'done' | 'skipped'
+  createdAt: number
+  updatedAt: number
+  /** When you last wrote or revisited it. */
+  reviewedAt?: number
+}
+
 class ReaderDB extends Dexie {
   books!: EntityTable<Book, 'id'>
   files!: EntityTable<BookFile, 'id'>
@@ -121,6 +147,7 @@ class ReaderDB extends Dexie {
   bookmarks!: EntityTable<Bookmark, 'id'>
   sessions!: EntityTable<Session, 'id'>
   settings!: EntityTable<Setting, 'key'>
+  recaps!: EntityTable<Recap, 'id'>
 
   constructor() {
     super('i-read-books')
@@ -149,6 +176,17 @@ class ReaderDB extends Dexie {
           })
         }
       })
+    this.version(3).stores({
+      recaps: 'id, bookId, [bookId+start], updatedAt',
+    })
+    // Recaps sync too.
+    this.version(4)
+      .stores({ recaps: 'id, bookId, [bookId+start], updatedAt, dirty' })
+      .upgrade(async (tx) => {
+        await tx.table('recaps').toCollection().modify((r: Synced) => {
+          r.dirty = 1
+        })
+      })
   }
 }
 
@@ -167,8 +205,8 @@ export const uid = () =>
 // leave a tombstone. Writes made *by the sync engine* opt out by running in a
 // transaction registered with `markSyncTransaction`.
 
-export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions'
-export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions']
+export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps'
+export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps']
 
 /** Fields that never leave this device, so changing them alone isn't a sync-worthy edit. */
 const LOCAL_ONLY = new Set(['cover', 'dirty', 'uploadError', 'enriched'])

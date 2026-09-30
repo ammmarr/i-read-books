@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Bookmark as BookmarkIcon, BookmarkPlus, ChevronRight, Copy, Highlighter, ListTree, X } from 'lucide-react'
-import type { Book, Bookmark, Highlight, HighlightColor } from '../db/db'
+import { Bookmark as BookmarkIcon, BookmarkPlus, ChevronRight, Copy, Highlighter, ListTree, NotebookPen, X } from 'lucide-react'
+import type { Book, Bookmark, Highlight, HighlightColor, Recap } from '../db/db'
+import type { Chapter } from '../lib/recaps'
 import type { OutlineItem } from '../lib/pdf'
 import { Sheet } from '../components/ui/Sheet'
 import { Segmented } from '../components/ui/Segmented'
@@ -28,6 +29,11 @@ interface Props {
   onDeleteBookmark: (b: Bookmark) => void
   onCopyAll: () => void
   chapterFor: (page: number) => string | undefined
+  chapters: Chapter[]
+  recaps: Recap[]
+  /** What "Recap" in Contents writes about right now. */
+  recapTarget: Chapter | null
+  onRecap: (c: Chapter) => void
 }
 
 export function ReaderSidebar(p: Props) {
@@ -63,11 +69,30 @@ export function ReaderSidebar(p: Props) {
   )
 }
 
-function Contents({ outline, currentPage, onJump, chapterTitle, book }: Props) {
+function RecapButton({ target, recaps, onRecap }: Pick<Props, 'recaps' | 'onRecap'> & { target: Chapter | null }) {
+  if (!target) return null
+  const r = recaps.find((x) => x.start === target.start)
+  return (
+    <div className="px-2 pb-2">
+      <Button variant="outline" className="w-full min-w-0 justify-start" onClick={() => onRecap(target)} title="Recap (R)">
+        <NotebookPen className="size-4 shrink-0 text-link" />
+        <span className="shrink-0">{r?.state === 'done' ? 'Your recap:' : 'Recap:'}</span>
+        <span className="min-w-0 truncate font-normal text-body">{target.title}</span>
+      </Button>
+    </div>
+  )
+}
+
+const cleanTitle = (t: string) => t.replace(/\s+/g, ' ').trim()
+
+function Contents({ outline, currentPage, onJump, chapterTitle, book, chapters, recaps, recapTarget, onRecap }: Props) {
   if (!outline.length)
     return (
       <Empty icon={<ListTree className="size-5" />} title="No table of contents" body="This PDF doesn't include chapter bookmarks. Use the page scrubber or search to get around.">
-        <div className="mt-5 grid grid-cols-5 gap-1.5 px-2">
+        <div className="-mx-2 mt-5 text-left">
+          <RecapButton target={recapTarget} recaps={recaps} onRecap={onRecap} />
+        </div>
+        <div className="mt-3 grid grid-cols-5 gap-1.5 px-2">
           {Array.from({ length: Math.min(book.pageCount, 60) }, (_, i) => {
             const page = Math.round((i / Math.max(1, Math.min(book.pageCount, 60) - 1)) * (book.pageCount - 1))
             return (
@@ -85,22 +110,44 @@ function Contents({ outline, currentPage, onJump, chapterTitle, book }: Props) {
         </div>
       </Empty>
     )
+  // Chapters (as recaps see them) matched by where they start and their title.
+  const recapOf: RecapOf = (it) => {
+    const c = it.page != null ? chapters.find((ch) => ch.start === it.page && ch.title === cleanTitle(it.title)) : undefined
+    if (!c) return undefined
+    const r = recaps.find((x) => x.start === c.start)
+    return r && r.state !== 'skipped' ? { recap: r, open: () => onRecap(c) } : undefined
+  }
   return (
-    <ul>
-      {outline.map((it, i) => (
-        <OutlineNode key={i} item={it} depth={0} currentPage={currentPage} onJump={onJump} chapterTitle={chapterTitle} />
-      ))}
-    </ul>
+    <>
+      <RecapButton target={recapTarget} recaps={recaps} onRecap={onRecap} />
+      <ul>
+        {outline.map((it, i) => (
+          <OutlineNode key={i} item={it} depth={0} currentPage={currentPage} onJump={onJump} chapterTitle={chapterTitle} recapOf={recapOf} />
+        ))}
+      </ul>
+    </>
   )
 }
 
-function OutlineNode({ item, depth, currentPage, onJump, chapterTitle }: { item: OutlineItem; depth: number; currentPage: number; onJump: (p: number) => void; chapterTitle?: string }) {
+type RecapOf = (it: OutlineItem) => { recap: Recap; open: () => void } | undefined
+
+function OutlineNode({
+  item, depth, currentPage, onJump, chapterTitle, recapOf,
+}: {
+  item: OutlineItem
+  depth: number
+  currentPage: number
+  onJump: (p: number) => void
+  chapterTitle?: string
+  recapOf: RecapOf
+}) {
   const containsCurrent = useMemo(() => {
     const walk = (it: OutlineItem): boolean => it.title === chapterTitle || it.items.some(walk)
     return item.items.some(walk)
   }, [item, chapterTitle])
   const [open, setOpen] = useState(containsCurrent || depth === 0 && item.items.length > 0 && item.items.length < 6)
   const active = item.title === chapterTitle
+  const rc = recapOf(item)
   return (
     <li>
       <div
@@ -125,6 +172,16 @@ function OutlineNode({ item, depth, currentPage, onJump, chapterTitle }: { item:
           </span>
           {item.page != null && <span className="shrink-0 text-body-sm tabular text-faint">{item.page + 1}</span>}
         </button>
+        {rc && (
+          <button
+            onClick={rc.open}
+            aria-label={rc.recap.state === 'done' ? 'Your recap' : 'Recap waiting'}
+            title={rc.recap.state === 'done' ? 'Your recap' : 'Recap waiting'}
+            className="-ml-2 mr-1 grid size-8 shrink-0 place-items-center rounded-full hover:bg-hairline"
+          >
+            {rc.recap.state === 'done' ? <NotebookPen className="size-3.5 text-link" /> : <span className="size-2 rounded-full bg-warning" />}
+          </button>
+        )}
       </div>
       <AnimatePresence initial={false}>
         {open && item.items.length > 0 && (
@@ -136,7 +193,7 @@ function OutlineNode({ item, depth, currentPage, onJump, chapterTitle }: { item:
             className="overflow-hidden"
           >
             {item.items.map((c, i) => (
-              <OutlineNode key={i} item={c} depth={depth + 1} currentPage={currentPage} onJump={onJump} chapterTitle={chapterTitle} />
+              <OutlineNode key={i} item={c} depth={depth + 1} currentPage={currentPage} onJump={onJump} chapterTitle={chapterTitle} recapOf={recapOf} />
             ))}
           </motion.ul>
         )}

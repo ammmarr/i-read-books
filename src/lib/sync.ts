@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import {
   db, markSyncTransaction, readTombstones, setLocalChangeListener, writeTombstones, SYNC_TABLES,
-  type Book, type Bookmark, type Highlight, type Session, type SyncTable,
+  type Book, type Bookmark, type Highlight, type Recap, type Session, type SyncTable,
 } from '../db/db'
 import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
 import { formatPages, readPagesOf } from './pages'
@@ -48,6 +48,7 @@ const REMOTE: Record<SyncTable, string> = {
   highlights: 'irb_highlights',
   bookmarks: 'irb_bookmarks',
   sessions: 'irb_sessions',
+  recaps: 'irb_recaps',
 }
 
 /** Supabase's free plan caps a single upload at 50 MB. */
@@ -87,6 +88,14 @@ function toRemote(table: SyncTable, r: Row): Row {
         updated_at: s.updatedAt ?? Date.now(), deleted: false,
       }
     }
+    case 'recaps': {
+      const c = r as unknown as Recap
+      return {
+        id: c.id, book_id: c.bookId, start_page: c.start, end_page: c.end, chapter: c.chapter, sections: c.sections ?? [],
+        answers: c.answers ?? {}, state: c.state, created_at: c.createdAt, reviewed_at: n(c.reviewedAt),
+        updated_at: c.updatedAt ?? Date.now(), deleted: false,
+      }
+    }
   }
 }
 
@@ -123,7 +132,31 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
       return {
         ...base, id: r.id, bookId: r.book_id, start: r.start_ms, end: r.end_ms, seconds: r.seconds ?? 0, pages: r.pages ?? [],
       }
+    case 'recaps':
+      return {
+        ...base, id: r.id, bookId: r.book_id, start: r.start_page ?? 0, end: r.end_page ?? 0, chapter: r.chapter ?? '',
+        sections: r.sections ?? [], answers: r.answers ?? {}, state: r.state ?? 'due', createdAt: r.created_at ?? Date.now(),
+        reviewedAt: u(r.reviewed_at as number | null),
+      }
   }
+}
+
+/** A recap with something written in it. */
+const written = (answers: unknown) => Object.values((answers ?? {}) as Record<string, string>).some((a) => typeof a === 'string' && a.trim() !== '')
+
+// ── Tables the cloud doesn't have yet ────────────────────────────────────
+// (the app is newer than the schema.sql that was run). Everything else keeps
+// syncing; Settings asks for the schema to be updated.
+const missingTables = new Set<string>()
+const isMissingTable = (e: unknown) => {
+  const x = e as { code?: string; message?: string } | null
+  return x?.code === 'PGRST205' || x?.code === '42P01' || /could not find the table|relation "?[\w.]+"? does not exist/i.test(x?.message ?? '')
+}
+function noteTable(table: string, missing: boolean) {
+  if (missing === missingTables.has(table)) return
+  if (missing) missingTables.add(table)
+  else missingTables.delete(table)
+  refreshWarning()
 }
 
 const cursorKey = (userId: string, t: string) => `irb-sync-${userId}-${t}`
@@ -149,7 +182,12 @@ async function pull(userId: string) {
     for (;;) {
       const since = getCursor(userId, t)
       const { data, error } = await sb.from(REMOTE[t]).select('*').gt('server_ts', since).order('server_ts').limit(500)
+      if (error && t !== 'books' && isMissingTable(error)) {
+        noteTable(REMOTE[t], true)
+        break
+      }
       if (error) throw error
+      noteTable(REMOTE[t], false)
       if (!data?.length) break
       await db.transaction('rw', db.table(t), db.files, async () => {
         markSyncTransaction()
@@ -171,6 +209,12 @@ async function pull(userId: string) {
             if (t === 'books' && remotePosAt > localPosAt) {
               await db.table(t).update(id, { currentPage: row.current_page ?? 0, pageOffset: row.page_offset ?? 0, positionAt: remotePosAt })
             }
+            continue
+          }
+          if (t === 'recaps' && local && written((local as unknown as Recap).answers) && !written(row.answers)) {
+            // The other device only noted this chapter as finished (or skipped
+            // it) — what you wrote here stands, and goes up on the next push.
+            await db.table(t).update(id, { dirty: 1, updatedAt: Math.max(Date.now(), (row.updated_at as number) + 1) })
             continue
           }
           const next = fromRemote(t, row, local)
@@ -242,7 +286,14 @@ function noteMissingColumn(table: string, column: string) {
   const s = missingColumns.get(table) ?? new Set<string>()
   s.add(column)
   missingColumns.set(table, s)
-  set({ warning: 'Your cloud database is older than this app, so a few details (like hand-edited progress) aren’t saved. Run the latest supabase/schema.sql once to finish the update.' })
+  refreshWarning()
+}
+
+function refreshWarning() {
+  const parts: string[] = []
+  if (missingColumns.size) parts.push('Your cloud database is older than this app, so a few details (like hand-edited progress) aren’t saved.')
+  if (missingTables.has('irb_recaps')) parts.push('Chapter recaps aren’t syncing between your devices yet.')
+  set({ warning: parts.length ? `${parts.join(' ')} Run the latest supabase/schema.sql once to finish the update.` : null })
 }
 
 async function upsertRows(table: string, rows: Row[]) {
@@ -281,6 +332,10 @@ async function push(userId: string) {
         })
       }
     } catch (e) {
+      if (isMissingTable(e)) {
+        noteTable(REMOTE[t], true)
+        continue
+      }
       console.warn(`sync: pushing ${t} failed`, e)
       firstError ??= e
     }
@@ -291,7 +346,8 @@ async function push(userId: string) {
   if (tombs.length) {
     for (const t of SYNC_TABLES) {
       const ids = tombs.filter((x) => x.table === t).map((x) => x.id)
-      if (!ids.length) continue
+      // No table yet → nothing up there to delete; keep the tombstones for later.
+      if (!ids.length || missingTables.has(REMOTE[t])) continue
       for (let i = 0; i < ids.length; i += 200) {
         const chunk = ids.slice(i, i + 200)
         const { error } = await sb.from(REMOTE[t]).update({ deleted: true, updated_at: Date.now() }).in('id', chunk)
@@ -301,7 +357,7 @@ async function push(userId: string) {
         }
       }
     }
-    const done = new Set(tombs.map((x) => `${x.table}:${x.id}:${x.at}`))
+    const done = new Set(tombs.filter((x) => !missingTables.has(REMOTE[x.table])).map((x) => `${x.table}:${x.id}:${x.at}`))
     writeTombstones(readTombstones().filter((x) => !done.has(`${x.table}:${x.id}:${x.at}`)))
   }
 }

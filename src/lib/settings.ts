@@ -11,6 +11,10 @@ export interface Settings {
   keepAwake: boolean
   autoHideChrome: boolean
   showSessionTimer: boolean
+  /** Ask for a recap when you finish a chapter. */
+  chapterRecaps: boolean
+  /** Books where you said "don't ask" for recaps. */
+  recapsOffBooks: string[]
 }
 
 const DEFAULTS: Settings = {
@@ -20,6 +24,8 @@ const DEFAULTS: Settings = {
   keepAwake: true,
   autoHideChrome: true,
   showSessionTimer: true,
+  chapterRecaps: true,
+  recapsOffBooks: [],
 }
 
 const KEY = 'irb-settings'
@@ -42,7 +48,7 @@ export function getSettings() {
 }
 
 /** Settings that follow you across devices (theme stays per-device). */
-export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer']
+export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapsOffBooks']
 const META_KEY = 'irb-settings-meta'
 
 export function getSettingsMeta(): { updatedAt: number; dirty: boolean } {

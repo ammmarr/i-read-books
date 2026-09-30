@@ -6,6 +6,7 @@ import './lib/install'
 import { startSync } from './lib/sync'
 import { initNative, isNative } from './lib/native'
 import { enrichFromOpenLibrary } from './lib/readingList'
+import { initUpdates } from './lib/update'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -18,4 +19,4 @@ startSync()
 setTimeout(() => void enrichFromOpenLibrary(), 3000)
 
 if (isNative) void initNative()
-else import('virtual:pwa-register').then(({ registerSW }) => registerSW({ immediate: true }))
+initUpdates()

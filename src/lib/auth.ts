@@ -138,9 +138,9 @@ export async function deleteAccount(opts: { eraseDevice: boolean; onStep?: (s: D
   resetSyncCursors(uid)
   writeTombstones([])
   if (opts.eraseDevice) {
-    await db.transaction('rw', [db.books, db.files, db.highlights, db.bookmarks, db.sessions], async () => {
+    await db.transaction('rw', [db.books, db.files, db.highlights, db.bookmarks, db.sessions, db.recaps], async () => {
       markSyncTransaction()
-      await Promise.all([db.books.clear(), db.files.clear(), db.highlights.clear(), db.bookmarks.clear(), db.sessions.clear()])
+      await Promise.all([db.books.clear(), db.files.clear(), db.highlights.clear(), db.bookmarks.clear(), db.sessions.clear(), db.recaps.clear()])
     })
   } else {
     // Keep reading here; everything becomes "not yet uploaded" again, in case

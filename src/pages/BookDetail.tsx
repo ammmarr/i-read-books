@@ -19,6 +19,7 @@ import { useToast } from '../components/ui/Toast'
 import { addDays, bookStats, dailyTotals, dayKey, startOfDay, summarize } from '../lib/stats'
 import { formatBytes, formatDate, formatDuration, formatDurationLong, relativeTime, pluralize } from '../lib/format'
 import { HL_COLORS, swatchOf } from '../reader/HighlightTools'
+import { RecapSection } from '../components/recap/RecapSection'
 
 export default function BookDetail() {
   const { id } = useParams()
@@ -177,6 +178,8 @@ export default function BookDetail() {
           />
         </section>
       )}
+
+      {book.pageCount > 0 && <RecapSection book={book} onJumpToHighlight={openAt} />}
 
       <section className="mt-10">
         <div className="mb-4 flex flex-wrap items-center gap-2">
