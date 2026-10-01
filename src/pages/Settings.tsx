@@ -16,6 +16,7 @@ import { useImporter } from '../components/Importer'
 import { cloudEnabled } from '../lib/supabase'
 import { setRecapsEnabled, useRecapPrefs } from '../lib/recaps'
 import { applyUpdate, checkForUpdate, useUpdate, versionLabel } from '../lib/update'
+import { Logo } from '../components/Logo'
 
 const GOALS = [10, 15, 20, 30, 45, 60]
 
@@ -229,6 +230,7 @@ function VersionFooter() {
   }, [])
   return (
     <div className="mt-10 flex flex-col items-center gap-1 text-center text-body-sm text-faint">
+      <Logo className="mb-2 h-12 text-body" motion="flow" weight={11} />
       <p>I read · version {label} · made for one reader</p>
       {u.available ? (
         <button onClick={() => void applyUpdate()} className="font-medium text-link hover:underline">

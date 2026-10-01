@@ -1,105 +1,110 @@
-// Builds every logo/icon from the line-art drawing in assets/logo-source.jpg:
-//   src/assets/logo-lineart.png   transparent line art (the in-app logo, tinted by theme)
-//   public/…                      favicon + PWA / home-screen icons
-//   assets/…                      sources for `npx @capacitor/assets generate --android`
+// Builds every icon from the vector logo (src/assets/logo.json — made from
+// assets/logo-source.jpg by scripts/trace-logo.py): a white line on black.
+//   public/…                         favicon (SVG + PNG), PWA and home-screen icons
+//   android/…/drawable/…vector.xml   adaptive launcher icon (vector, sharp at any size)
+//   android/…/mipmap-*/…png          icons for Android 7 and older
 // Run: node scripts/make-app-assets.mjs
 import sharp from 'sharp'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 
-const SRC = 'assets/logo-source.jpg'
-const BG = { r: 0xd1, g: 0xd1, b: 0xd1 } // the drawing's own paper grey
-const INK = { r: 0x17, g: 0x17, b: 0x17 }
+const art = JSON.parse(readFileSync('src/assets/logo.json', 'utf8'))
+const BG = '#0a0a0a'
+const LINE = '#f2f2f2'
 
-mkdirSync('src/assets', { recursive: true })
+/**
+ * Where the drawing sits on a square icon (fractions of its side):
+ *   tile  big — the arms run down towards the bottom edge
+ *   safe  smaller, inside the circle that masked icons (Android, maskable PWA) keep
+ */
+const LAYOUT = { tile: { w: 0.66, top: 0.17 }, safe: { w: 0.5, top: 0.22 } }
+
+function place(size, layout) {
+  const c = LAYOUT[layout]
+  const s = (c.w * size) / art.w
+  return { s, x: (size - art.w * s) / 2, y: c.top * size }
+}
+
+/**
+ * Square icon as SVG. `line` = line width as a share of the icon (small icons
+ * need relatively bolder lines); `round` = corner radius share (0 = full bleed,
+ * for platforms that round icons themselves).
+ */
+function iconSvg(size, { layout = 'tile', round = 0.225, line = 0.017, bg = BG, shape = 'rect' } = {}) {
+  const { s, x, y } = place(size, layout)
+  const r = size * round
+  const sw = Math.max(1.4, size * line) / s
+  const clip = shape === 'circle' ? `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}"/>` : `<rect width="${size}" height="${size}" rx="${r}"/>`
+  const fill = bg ? (shape === 'circle' ? `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${bg}"/>` : `<rect width="${size}" height="${size}" rx="${r}" fill="${bg}"/>`) : ''
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">` +
+    `<defs><clipPath id="c">${clip}</clipPath></defs>${fill}` +
+    `<g clip-path="url(#c)"><g transform="translate(${x.toFixed(2)} ${y.toFixed(2)}) scale(${s.toFixed(5)})" fill="none" stroke="${LINE}" stroke-width="${sw.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round">` +
+    art.paths.map((d) => `<path d="${d}"/>`).join('') +
+    `</g></g></svg>`
+  )
+}
+
+const png = (file, size, opts) => sharp(Buffer.from(iconSvg(size, opts))).png({ compressionLevel: 9 }).toFile(file)
+
+// ── Web / PWA ────────────────────────────────────────────────────────────
 mkdirSync('public', { recursive: true })
+writeFileSync('public/favicon.svg', iconSvg(64, { line: 0.034 }))
+await png('public/favicon.png', 64, { line: 0.034 })
+await png('public/pwa-64x64.png', 64, { line: 0.03 })
+await png('public/pwa-192x192.png', 192, { line: 0.02 })
+await png('public/pwa-512x512.png', 512, { line: 0.016 })
+// iOS rounds home-screen icons itself (and shows transparency as black).
+await png('public/apple-touch-icon-180x180.png', 180, { round: 0, line: 0.02 })
+// Masked by the launcher; the drawing stays inside the safe circle.
+await png('public/maskable-icon-512x512.png', 512, { round: 0, layout: 'safe', line: 0.016 })
 
-// 1. Separate the lines from the paper → alpha mask, keeping the soft edges.
-const { data, info } = await sharp(SRC).greyscale().raw().toBuffer({ resolveWithObject: true })
-const W = info.width, H = info.height
-const paper = 209, ink = 20
-const alpha = new Uint8Array(W * H)
-let x0 = W, y0 = H, x1 = 0, y1 = 0
-for (let i = 0; i < W * H; i++) {
-  const a = Math.max(0, Math.min(1, (paper - data[i]) / (paper - ink)))
-  alpha[i] = Math.round(a * 255)
-  if (alpha[i] > 60) {
-    const x = i % W, y = (i / W) | 0
-    if (x < x0) x0 = x
-    if (x > x1) x1 = x
-    if (y < y0) y0 = y
-    if (y > y1) y1 = y
-  }
-}
-const pad = 12
-x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad)
-const cw = x1 - x0 + 1, ch = y1 - y0 + 1
+// ── Android ──────────────────────────────────────────────────────────────
+const RES = 'android/app/src/main/res'
 
-/** Max-filter (dilate) the alpha so thin strokes survive being shrunk. */
-function thicken(src, w, h, r) {
-  if (r <= 0) return src
-  const tmp = new Uint8Array(w * h), out = new Uint8Array(w * h)
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      let m = 0
-      for (let d = -r; d <= r; d++) { const xx = x + d; if (xx >= 0 && xx < w && src[y * w + xx] > m) m = src[y * w + xx] }
-      tmp[y * w + x] = m
-    }
-  for (let y = 0; y < h; y++)
-    for (let x = 0; x < w; x++) {
-      let m = 0
-      for (let d = -r; d <= r; d++) { const yy = y + d; if (yy >= 0 && yy < h && tmp[yy * w + x] > m) m = tmp[yy * w + x] }
-      out[y * w + x] = m
-    }
-  return out
-}
-
-function crop(stroke = 0) {
-  const a = new Uint8Array(cw * ch)
-  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) a[y * cw + x] = alpha[(y + y0) * W + (x + x0)]
-  return thicken(a, cw, ch, stroke)
-}
-
-/** Line art as an RGBA sharp image in the given colour. */
-function art(color, stroke = 0) {
-  const a = crop(stroke)
-  const rgba = Buffer.alloc(cw * ch * 4)
-  for (let i = 0; i < cw * ch; i++) {
-    rgba[i * 4] = color.r; rgba[i * 4 + 1] = color.g; rgba[i * 4 + 2] = color.b; rgba[i * 4 + 3] = a[i]
-  }
-  return sharp(rgba, { raw: { width: cw, height: ch, channels: 4 } })
+// Adaptive icon (Android 8+): black layer + the line as a vector, so it's sharp
+// on every screen — the launcher gives it its rounded shape.
+{
+  const V = 108
+  const { s, x, y } = place(V, 'safe')
+  const sw = ((V * 0.017) / s).toFixed(2)
+  const paths = art.paths
+    .map((d) => `        <path android:pathData="${d}" android:strokeColor="${LINE.toUpperCase()}" android:strokeWidth="${sw}" android:strokeLineCap="round" android:strokeLineJoin="round" />`)
+    .join('\n')
+  writeFileSync(
+    `${RES}/drawable/ic_launcher_foreground_vector.xml`,
+    `<?xml version="1.0" encoding="utf-8"?>
+<!-- Generated by scripts/make-app-assets.mjs — the I read line drawing. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:translateX="${x.toFixed(3)}" android:translateY="${y.toFixed(3)}" android:scaleX="${s.toFixed(5)}" android:scaleY="${s.toFixed(5)}">
+${paths}
+    </group>
+</vector>
+`,
+  )
+  const adaptive = `<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground_vector" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground_vector" />
+</adaptive-icon>
+`
+  writeFileSync(`${RES}/mipmap-anydpi-v26/ic_launcher.xml`, adaptive)
+  writeFileSync(`${RES}/mipmap-anydpi-v26/ic_launcher_round.xml`, adaptive)
+  writeFileSync(
+    `${RES}/values/ic_launcher_background.xml`,
+    `<?xml version="1.0" encoding="utf-8"?>\n<resources>\n    <color name="ic_launcher_background">${BG.toUpperCase()}</color>\n</resources>\n`,
+  )
 }
 
-/** Square icon: the figure centred, `fill` = share of the height it takes. */
-async function icon(file, size, { fill = 0.74, bg = BG, color = INK, stroke = 0, transparent = false } = {}) {
-  const h = Math.round(size * fill)
-  const figure = await art(color, stroke).resize({ height: h }).png().toBuffer()
-  const meta = await sharp(figure).metadata()
-  const base = sharp({
-    create: { width: size, height: size, channels: 4, background: transparent ? { r: 0, g: 0, b: 0, alpha: 0 } : { ...bg, alpha: 1 } },
-  })
-  await base
-    .composite([{ input: figure, left: Math.round((size - meta.width) / 2), top: Math.round((size - meta.height) / 2) + Math.round(size * 0.01) }])
-    .png()
-    .toFile(file)
+// Legacy icons (Android 7 and older): rounded square + round.
+for (const [dpi, size] of Object.entries({ ldpi: 36, mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 })) {
+  mkdirSync(`${RES}/mipmap-${dpi}`, { recursive: true })
+  await png(`${RES}/mipmap-${dpi}/ic_launcher.png`, size, { line: size < 100 ? 0.028 : 0.02 })
+  await png(`${RES}/mipmap-${dpi}/ic_launcher_round.png`, size, { shape: 'circle', layout: 'safe', line: size < 100 ? 0.028 : 0.02 })
 }
 
-// In-app logo (tinted by CSS, so it follows light/dark mode)
-await art(INK).png().toFile('src/assets/logo-lineart.png')
-
-// Web / PWA
-await icon('public/favicon.png', 64, { fill: 0.86, stroke: 2 })
-await icon('public/pwa-64x64.png', 64, { fill: 0.84, stroke: 2 })
-await icon('public/pwa-192x192.png', 192, { fill: 0.78, stroke: 1 })
-await icon('public/pwa-512x512.png', 512, { fill: 0.76, stroke: 1 })
-await icon('public/apple-touch-icon-180x180.png', 180, { fill: 0.74, stroke: 1 })
-await icon('public/maskable-icon-512x512.png', 512, { fill: 0.58, stroke: 1 }) // inside the circular safe zone
-
-// Android (@capacitor/assets): adaptive icon = foreground on a grey layer
-mkdirSync('assets', { recursive: true })
-await icon('assets/icon-only.png', 1024, { fill: 0.74, stroke: 2 })
-await icon('assets/icon-foreground.png', 1024, { fill: 0.57, stroke: 2, transparent: true }) // 66% safe zone
-await sharp({ create: { width: 1024, height: 1024, channels: 4, background: { ...BG, alpha: 1 } } }).png().toFile('assets/icon-background.png')
-await icon('assets/splash.png', 2732, { fill: 0.22, bg: { r: 0xfa, g: 0xfa, b: 0xfa }, stroke: 4 })
-await icon('assets/splash-dark.png', 2732, { fill: 0.22, bg: { r: 0x0a, g: 0x0a, b: 0x0a }, color: { r: 0xed, g: 0xed, b: 0xed }, stroke: 4 })
-
-console.log(`line art ${cw}×${ch}; icons written`)
+console.log('icons written')

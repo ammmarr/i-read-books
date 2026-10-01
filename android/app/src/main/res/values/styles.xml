@@ -16,7 +16,12 @@
     </style>
 
 
+    <!-- Starting up: plain black, like the icon. The logo then draws itself in
+         the app's boot screen (index.html), sharp on every display. -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
-        <item name="android:background">@drawable/splash</item>
+        <item name="windowSplashScreenBackground">@color/ic_launcher_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_blank</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:background">@color/ic_launcher_background</item>
     </style>
 </resources>

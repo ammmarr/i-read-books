@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
  * capacitor.config.ts plugin settings) so older apps ask for a new APK
  * instead of loading web code they can't run.
  */
-const NATIVE_REVISION = 1
+const NATIVE_REVISION = 2
 
 /** The commit being built — the same on Vercel and in the APK workflow. */
 export const buildId = () => process.env.GITHUB_SHA ?? process.env.VERCEL_GIT_COMMIT_SHA ?? 'dev'

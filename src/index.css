@@ -2,6 +2,7 @@
 @import '@fontsource-variable/geist';
 @import '@fontsource-variable/geist-mono';
 @import './styles/textlayer.css';
+@import './styles/logo.css';
 
 @custom-variant dark (&:where(.dark, .dark *));
 /* Touch-first devices (tablets, phones): layouts go full-width like native apps. */

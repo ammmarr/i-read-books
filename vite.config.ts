@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { readFileSync } from 'node:fs'
 import { buildId, nativeFingerprint } from './scripts/build-info.mjs'
 
 // Relative base so the build works from any static host sub-path
@@ -25,6 +26,19 @@ export default defineConfig({
   plugins: [
     react(),
     {
+      // The boot screen in index.html: the logo (src/assets/logo.json) with
+      // its motion (src/styles/logo.css) inlined, so it animates before the app loads.
+      name: 'boot-logo',
+      transformIndexHtml(html) {
+        const logo = JSON.parse(readFileSync('src/assets/logo.json', 'utf8')) as { w: number; h: number; paths: string[] }
+        const p = logo.paths.map((d) => `<path d="${d}" pathLength="1"/>`).join('')
+        const svg =
+          `<svg viewBox="0 0 ${logo.w} ${logo.h}" class="logo-art logo-draw-flow" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round">` +
+          `<g class="logo-lines" stroke-width="4.5">${p}</g><g class="logo-glint" stroke-width="8">${p}</g></svg>`
+        return html.replace('<!--boot-logo-->', svg).replace('/*logo-css*/', readFileSync('src/styles/logo.css', 'utf8'))
+      },
+    },
+    {
       name: 'build-time',
       generateBundle() {
         this.emitFile({ type: 'asset', fileName: 'build-time.txt', source: String(builtAt) })
@@ -35,13 +49,14 @@ export default defineConfig({
       // New versions wait for you to press "Update" (see src/lib/update.ts).
       registerType: 'prompt',
       injectRegister: false,
-      includeAssets: ['favicon.png', 'apple-touch-icon-180x180.png'],
+      includeAssets: ['favicon.svg', 'favicon.png', 'apple-touch-icon-180x180.png'],
       manifest: {
         name: 'I read',
         short_name: 'I read',
         description: 'A calm, private PDF reader with highlights and reading analytics.',
         theme_color: '#fafafa',
-        background_color: '#fafafa',
+        // The splash an installed app shows while starting — black, like the icon and boot screen.
+        background_color: '#0a0a0a',
         id: './',
         display: 'standalone',
         orientation: 'any',

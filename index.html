@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="icon" type="image/png" href="./favicon.png" />
     <link rel="apple-touch-icon" href="./apple-touch-icon-180x180.png" />
     <meta
@@ -19,8 +20,32 @@
         if (dark) document.documentElement.classList.add('dark')
       } catch (e) {}
     </script>
+    <style>
+      /* Boot screen: the logo draws itself while the app starts (main.tsx fades it out). */
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483000;
+        display: grid;
+        place-items: center;
+        background: #0a0a0a;
+        color: #ededed;
+        transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), visibility 0.5s;
+      }
+      #boot.out {
+        opacity: 0;
+        visibility: hidden;
+      }
+      #boot svg {
+        height: min(30vh, 170px);
+        width: auto;
+        overflow: visible;
+      }
+      /*logo-css*/
+    </style>
   </head>
   <body>
+    <div id="boot" aria-hidden="true"><!--boot-logo--></div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

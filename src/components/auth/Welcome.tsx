@@ -63,7 +63,7 @@ export function Welcome() {
                 transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
                 className="text-ink"
               >
-                <Logo className="h-28 md:h-36" title="I read" />
+                <Logo className="h-28 md:h-36" title="I read" weight={5.5} />
               </motion.div>
               <div className="mt-4 text-[22px] font-semibold tracking-[-0.6px] text-ink">I read</div>
               <h1 className="mt-8 text-[34px] font-semibold leading-[40px] tracking-[-1.4px] text-ink md:text-display-xl">

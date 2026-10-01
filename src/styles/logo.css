@@ -1,0 +1,56 @@
+/*
+ * The logo's motion — shared by <Logo> and the boot screen in index.html
+ * (which inlines this file, so it animates before the app has loaded).
+ * Paths use pathLength="1", so dash lengths are fractions of each line.
+ */
+
+/* Draw: the line sketches itself in. */
+.logo-draw .logo-lines path,
+.logo-draw-flow .logo-lines path {
+  stroke-dasharray: 1 3;
+  stroke-dashoffset: 1.02;
+  animation: logo-draw 1.35s cubic-bezier(0.65, 0, 0.35, 1) 0.1s forwards;
+}
+
+/* Flow: every few seconds a soft light runs along the line, end to end. */
+.logo-glint path {
+  stroke: var(--logo-glint, var(--color-link, #3291ff));
+  stroke-dasharray: 0.07 3;
+  stroke-dashoffset: 0.08;
+  opacity: 0;
+  animation: logo-flow 6.5s cubic-bezier(0.45, 0.05, 0.3, 1) 1.2s infinite;
+}
+.logo-draw-flow .logo-glint path {
+  animation-delay: 1.6s;
+}
+
+@keyframes logo-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes logo-flow {
+  0% {
+    stroke-dashoffset: 0.08;
+    opacity: 0;
+  }
+  6%,
+  40% {
+    opacity: 0.95;
+  }
+  47%,
+  100% {
+    stroke-dashoffset: -1;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-lines path {
+    animation: none !important;
+    stroke-dasharray: none !important;
+  }
+  .logo-glint {
+    display: none;
+  }
+}
