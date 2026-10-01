@@ -14,7 +14,7 @@ import { formatBytes } from '../lib/format'
 import { AccountSync } from '../components/AccountSync'
 import { useImporter } from '../components/Importer'
 import { cloudEnabled } from '../lib/supabase'
-import { setRecapsEnabled, useRecapPrefs } from '../lib/recaps'
+import { setRecapsEnabled, setSectionRecaps, useRecapPrefs } from '../lib/recaps'
 import { applyUpdate, checkForUpdate, useUpdate, versionLabel } from '../lib/update'
 import { Logo } from '../components/Logo'
 
@@ -116,6 +116,14 @@ export default function SettingsPage() {
           checked={recap.enabled}
           onChange={setRecapsEnabled}
         />
+        {recap.enabled && (
+          <Toggle
+            label="Also after each section"
+            hint="Recall each part of a chapter too, as you finish it — short and easy to pass on."
+            checked={recap.sections}
+            onChange={setSectionRecaps}
+          />
+        )}
       </Group>
 
       {(available || !isStandalone()) && (

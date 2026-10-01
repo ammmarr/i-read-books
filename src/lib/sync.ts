@@ -5,6 +5,7 @@ import {
 } from '../db/db'
 import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
 import { formatPages, readPagesOf } from './pages'
+import { kindFromId } from './recaps'
 import { SYNCED_SETTINGS, getSettings, getSettingsMeta, setSettingsChangeListener, setSettingsMeta, updateSettings, type Settings } from './settings'
 
 /**
@@ -92,6 +93,7 @@ function toRemote(table: SyncTable, r: Row): Row {
       const c = r as unknown as Recap
       return {
         id: c.id, book_id: c.bookId, start_page: c.start, end_page: c.end, chapter: c.chapter, sections: c.sections ?? [],
+        kind: c.kind ?? 'chapter', parent: n(c.parent),
         answers: c.answers ?? {}, state: c.state, created_at: c.createdAt, reviewed_at: n(c.reviewedAt),
         updated_at: c.updatedAt ?? Date.now(), deleted: false,
       }
@@ -137,6 +139,8 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
         ...base, id: r.id, bookId: r.book_id, start: r.start_page ?? 0, end: r.end_page ?? 0, chapter: r.chapter ?? '',
         sections: r.sections ?? [], answers: r.answers ?? {}, state: r.state ?? 'due', createdAt: r.created_at ?? Date.now(),
         reviewedAt: u(r.reviewed_at as number | null),
+        // Older cloud schemas don't store these: a section's id gives it away.
+        kind: (r.kind as string | undefined) ?? kindFromId(String(r.id)), parent: u((r.parent as string | null | undefined) ?? null),
       }
   }
 }

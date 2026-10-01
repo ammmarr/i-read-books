@@ -39,6 +39,11 @@ export const RECAP_QUESTIONS: RecapPrompt[] = [
   },
 ]
 
+export type RecapKind = 'chapter' | 'section'
+export const kindOf = (r: Pick<Recap, 'kind'> | Pick<Chapter, 'kind'>): RecapKind => r.kind ?? 'chapter'
+/** A question as asked about this unit ("…from this section?"). */
+export const questionTitle = (q: RecapPrompt, kind: RecapKind) => (kind === 'section' ? q.title.replace('this chapter', 'this section') : q.title)
+
 /** "Pages 12–30" — unless the title already says so (books without a table of contents). */
 export function pageRange(c: { title: string; start: number; end: number }) {
   const r = `Pages ${c.start + 1}–${c.end + 1}`
@@ -47,8 +52,9 @@ export function pageRange(c: { title: string; start: number; end: number }) {
 
 export const hasAnswers = (r: Pick<Recap, 'answers'> | undefined) => !!r && RECAP_QUESTIONS.some((q) => r.answers[q.key]?.trim())
 
-// ── Chapters from the table of contents ────────────────────────────────
+// ── Chapters and sections from the table of contents ───────────────────
 
+/** Something you can recap: a chapter, or a section inside one. */
 export interface Chapter {
   title: string
   /** 0-based, inclusive. */
@@ -56,6 +62,12 @@ export interface Chapter {
   end: number
   /** Titles of the sections inside it (from the table of contents). */
   sections: string[]
+  /** Default 'chapter'. */
+  kind?: RecapKind
+  /** For a section: the chapter it belongs to. */
+  parent?: string
+  /** For a chapter: its sections, with their pages. */
+  parts?: Chapter[]
 }
 
 /** Front and back matter — not chapters you'd recap. */
@@ -76,7 +88,30 @@ interface Node {
   page: number
   depth: number
   leaf: boolean
-  sections: string[]
+  /** Direct children with a page: the sections, if this turns out to be a chapter. */
+  kids: { title: string; page: number }[]
+}
+
+/**
+ * A chapter's sections with page ranges. Sections starting on the same page
+ * become one ("A · B"); the last runs to the end of the chapter.
+ */
+function partsOf(chapter: Chapter, kids: Node['kids']): Chapter[] {
+  const ks = kids.filter((k) => k.page >= chapter.start && k.page <= chapter.end && k.title && !isMatter(k.title)).sort((a, b) => a.page - b.page)
+  const merged: { title: string; page: number }[] = []
+  for (const k of ks) {
+    const last = merged[merged.length - 1]
+    if (last && last.page === k.page) last.title = `${last.title} · ${k.title}`
+    else merged.push({ ...k })
+  }
+  return merged.map((k, i) => ({
+    title: k.title,
+    start: k.page,
+    end: i + 1 < merged.length ? merged[i + 1].page - 1 : chapter.end,
+    sections: [],
+    kind: 'section' as const,
+    parent: chapter.title,
+  }))
 }
 
 /**
@@ -85,7 +120,7 @@ interface Node {
  * picks the shallowest level that looks like chapters: at least three of
  * them, not "Part One"-style groupings, and not huge. Front and back matter
  * (contents, index, notes…) still end the chapter before them but aren't
- * chapters themselves.
+ * chapters themselves. Each chapter's own entries become its sections.
  */
 export function chaptersOf(outline: OutlineItem[], pageCount: number): Chapter[] {
   if (!outline.length || pageCount < 2) return []
@@ -94,7 +129,13 @@ export function chaptersOf(outline: OutlineItem[], pageCount: number): Chapter[]
     for (const it of items) {
       const kids = it.items.filter((c) => c.page != null || c.items.length)
       if (it.page != null && it.page < pageCount)
-        nodes.push({ title: clean(it.title), page: it.page, depth, leaf: !kids.length, sections: kids.map((c) => clean(c.title)).filter((t) => t && !isMatter(t)) })
+        nodes.push({
+          title: clean(it.title),
+          page: it.page,
+          depth,
+          leaf: !kids.length,
+          kids: kids.filter((c) => c.page != null).map((c) => ({ title: clean(c.title), page: c.page! })),
+        })
       walk(it.items, depth + 1)
     }
   }
@@ -110,7 +151,9 @@ export function chaptersOf(outline: OutlineItem[], pageCount: number): Chapter[]
       if (!(n.depth === level || (n.depth < level && n.leaf)) || isMatter(n.title) || seen.has(n.page)) continue
       seen.add(n.page)
       const next = bounds.find((p) => p > n.page)
-      out.push({ title: n.title, start: n.page, end: (next ?? pageCount) - 1, sections: n.sections })
+      const c: Chapter = { title: n.title, start: n.page, end: (next ?? pageCount) - 1, sections: n.kids.map((k) => k.title).filter((t) => t && !isMatter(t)) }
+      c.parts = partsOf(c, n.kids)
+      out.push(c)
     }
     return out
   }
@@ -130,6 +173,9 @@ export function chaptersOf(outline: OutlineItem[], pageCount: number): Chapter[]
   return fallback
 }
 
+/** Every chapter's sections, in reading order. */
+export const sectionsOf = (chapters: Chapter[]) => chapters.flatMap((c) => c.parts ?? [])
+
 /** Share of the chapter's pages you've actually read. */
 export function coverage(c: Pick<Chapter, 'start' | 'end'>, read: Set<number>) {
   let n = 0
@@ -138,8 +184,8 @@ export function coverage(c: Pick<Chapter, 'start' | 'end'>, read: Set<number>) {
 }
 
 /**
- * The chapter you most recently finished, seen from `page`: the one you're in
- * if you've read its last page, otherwise the one before it.
+ * The chapter (or section) you most recently finished, seen from `page`: the
+ * one you're in if you've read its last page, otherwise the one before it.
  */
 export function lastFinishedChapter(chapters: Chapter[], page: number, read: Set<number>) {
   for (let i = chapters.length - 1; i >= 0; i--) {
@@ -159,6 +205,11 @@ export function chapterForRecap(chapters: Chapter[], page: number) {
   return chapters[idx]
 }
 
+/** The section you're in (none on a chapter's opening pages, before its first section). */
+export function sectionForRecap(sections: Chapter[], page: number) {
+  return sections.find((s) => s.start <= page && page <= s.end) ?? null
+}
+
 /**
  * Books without a table of contents: recap "what you've read since the last
  * recap", up to the page you're on.
@@ -170,35 +221,86 @@ export function pagesChapter(recaps: Recap[], page: number): Chapter {
   return { title: `Pages ${start + 1}–${page + 1}`, start, end: page, sections: [] }
 }
 
+/** The unit a stored recap is about. */
+export const unitOf = (r: Recap): Chapter => ({ title: r.chapter, start: r.start, end: r.end, sections: r.sections ?? [], kind: kindOf(r), parent: r.parent })
+
 // ── Storage ────────────────────────────────────────────────────────────
 
-/** Same chapter, same id on every device — so two devices can't make two recaps of it. */
-export const recapId = (bookId: string, start: number) => `${bookId}:${start}`
+/** Short, stable hash of a title (sections can start on the same page as their chapter). */
+function titleHash(t: string) {
+  let h = 0x811c9dc5
+  for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 0x01000193)
+  return (h >>> 0).toString(36)
+}
 
-export const findRecap = (bookId: string, start: number) => db.recaps.where('[bookId+start]').equals([bookId, start]).first()
+/**
+ * Same chapter or section, same id on every device — so two devices can't
+ * make two recaps of it. Chapters: "{book}:{first page}"; sections add their
+ * title: "{book}:{first page}:{hash}".
+ */
+export const recapId = (bookId: string, c: Pick<Chapter, 'start' | 'title' | 'kind'>) =>
+  kindOf(c) === 'section' ? `${bookId}:${c.start}:${titleHash(c.title)}` : `${bookId}:${c.start}`
+
+/** A section's id has three parts — how to tell sections apart where the cloud doesn't store `kind`. */
+export const kindFromId = (id: string): RecapKind => (id.split(':').length === 3 ? 'section' : 'chapter')
+
+export async function findRecap(bookId: string, c: Pick<Chapter, 'start' | 'title' | 'kind'>) {
+  const byId = await db.recaps.get(recapId(bookId, c))
+  if (byId || kindOf(c) === 'section') return byId
+  // Chapters written before ids were derived from the chapter.
+  return db.recaps
+    .where('[bookId+start]')
+    .equals([bookId, c.start])
+    .filter((r) => kindOf(r) === 'chapter')
+    .first()
+}
 
 /** Notes that you finished a chapter, so its recap waits for you (idempotent). */
 export async function markRecapDue(bookId: string, c: Chapter) {
-  const existing = await findRecap(bookId, c.start)
+  const existing = await findRecap(bookId, c)
   if (existing) return existing
   const now = Date.now()
-  const r: Recap = { id: recapId(bookId, c.start), bookId, start: c.start, end: c.end, chapter: c.title, sections: c.sections, answers: {}, state: 'due', createdAt: now, updatedAt: now }
+  const r: Recap = {
+    id: recapId(bookId, c), bookId, start: c.start, end: c.end, chapter: c.title, sections: c.sections, kind: kindOf(c), parent: c.parent,
+    answers: {}, state: 'due', createdAt: now, updatedAt: now,
+  }
   await db.recaps.add(r)
   return r
 }
 
+/** Recaps grouped by chapter, in reading order: each chapter's own recap (if any), then its sections'. */
+export function groupRecaps(recaps: Recap[]) {
+  const sorted = [...recaps].sort((a, b) => a.start - b.start || (kindOf(a) === 'chapter' ? -1 : 1))
+  const groups: { title: string; start: number; chapter?: Recap; sections: Recap[] }[] = []
+  const byTitle = new Map<string, (typeof groups)[number]>()
+  for (const r of sorted) {
+    const key = kindOf(r) === 'section' ? r.parent || 'Sections' : r.chapter
+    let g = byTitle.get(key)
+    if (!g) {
+      g = { title: key, start: r.start, sections: [] }
+      byTitle.set(key, g)
+      groups.push(g)
+    }
+    if (kindOf(r) === 'chapter') g.chapter = r
+    else g.sections.push(r)
+  }
+  return groups.sort((a, b) => a.start - b.start)
+}
+
 export function recapsMarkdown(book: { title: string; author?: string }, recaps: Recap[]) {
-  const done = recaps.filter((r) => r.state === 'done').sort((a, b) => a.start - b.start)
+  const answers = (r: Recap) =>
+    RECAP_QUESTIONS.flatMap((q) => (r.answers[q.key]?.trim() ? [`**${q.label}**`, '', r.answers[q.key]!.trim(), ''] : []))
   return [
-    `# ${book.title}${book.author ? ` — ${book.author}` : ''} · chapter recaps`,
+    `# ${book.title}${book.author ? ` — ${book.author}` : ''} · recaps`,
     '',
-    ...done.flatMap((r) => {
-      const range = pageRange({ title: r.chapter, start: r.start, end: r.end })
+    ...groupRecaps(recaps.filter((r) => r.state === 'done')).flatMap((g) => {
+      const range = g.chapter && pageRange({ title: g.chapter.chapter, start: g.chapter.start, end: g.chapter.end })
       return [
-        `## ${r.chapter}`,
+        `## ${g.title}`,
         ...(range ? [`_${range}_`] : []),
         '',
-        ...RECAP_QUESTIONS.flatMap((q) => (r.answers[q.key]?.trim() ? [`**${q.label}**`, '', r.answers[q.key]!.trim(), ''] : [])),
+        ...(g.chapter ? answers(g.chapter) : []),
+        ...g.sections.flatMap((s) => [`### ${s.chapter}`, '', ...answers(s)]),
       ]
     }),
   ].join('\n')
@@ -207,6 +309,7 @@ export function recapsMarkdown(book: { title: string; author?: string }, recaps:
 // ── Preferences (synced with your other settings) ──────────────────────
 
 export const setRecapsEnabled = (enabled: boolean) => updateSettings({ chapterRecaps: enabled })
+export const setSectionRecaps = (on: boolean) => updateSettings({ recapSections: on })
 export function setBookRecaps(bookId: string, on: boolean) {
   const off = getSettings().recapsOffBooks
   updateSettings({ recapsOffBooks: on ? off.filter((b) => b !== bookId) : [...new Set([...off, bookId])] })
@@ -214,5 +317,5 @@ export function setBookRecaps(bookId: string, on: boolean) {
 
 export function useRecapPrefs() {
   const s = useSettings()
-  return { enabled: s.chapterRecaps, offBooks: s.recapsOffBooks }
+  return { enabled: s.chapterRecaps, sections: s.recapSections, offBooks: s.recapsOffBooks }
 }

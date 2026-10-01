@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Bookmark as BookmarkIcon, BookmarkPlus, ChevronRight, Copy, Highlighter, ListTree, NotebookPen, X } from 'lucide-react'
 import type { Book, Bookmark, Highlight, HighlightColor, Recap } from '../db/db'
-import { coverage, MIN_RECAP_PAGES, RECAP_COVERAGE, type Chapter } from '../lib/recaps'
+import { coverage, kindOf, MIN_RECAP_PAGES, RECAP_COVERAGE, recapId, type Chapter } from '../lib/recaps'
 import { readPagesOf } from '../lib/pages'
 import type { OutlineItem } from '../lib/pdf'
 import { Sheet } from '../components/ui/Sheet'
@@ -32,8 +32,11 @@ interface Props {
   chapterFor: (page: number) => string | undefined
   chapters: Chapter[]
   recaps: Recap[]
-  /** What "Recap" in Contents writes about right now. */
+  /** What "Recap" in Contents writes about right now: the chapter… */
   recapTarget: Chapter | null
+  /** …and the section you're in (when section recaps are on). */
+  recapSection: Chapter | null
+  sections: Chapter[]
   onRecap: (c: Chapter) => void
 }
 
@@ -70,28 +73,40 @@ export function ReaderSidebar(p: Props) {
   )
 }
 
-function RecapButton({ target, recaps, onRecap }: Pick<Props, 'recaps' | 'onRecap'> & { target: Chapter | null }) {
-  if (!target) return null
-  const r = recaps.find((x) => x.start === target.start)
+/** The recap stored for a chapter or section, if any. */
+function recapFor(recaps: Recap[], bookId: string, u: Chapter) {
+  const id = recapId(bookId, u)
+  return recaps.find((x) => x.id === id) ?? (kindOf(u) === 'chapter' ? recaps.find((x) => x.start === u.start && kindOf(x) === 'chapter') : undefined)
+}
+
+function RecapButtons({ targets, recaps, bookId, onRecap }: Pick<Props, 'recaps' | 'onRecap'> & { targets: (Chapter | null)[]; bookId: string }) {
+  const list = targets.filter((t): t is Chapter => !!t)
+  if (!list.length) return null
   return (
-    <div className="px-2 pb-2">
-      <Button variant="outline" className="w-full min-w-0 justify-start" onClick={() => onRecap(target)} title="Recap (R)">
-        <NotebookPen className="size-4 shrink-0 text-link" />
-        <span className="shrink-0">{r?.state === 'done' ? 'Your recap:' : 'Recap:'}</span>
-        <span className="min-w-0 truncate font-normal text-body">{target.title}</span>
-      </Button>
+    <div className="space-y-1.5 px-2 pb-2">
+      {list.map((t) => {
+        const done = recapFor(recaps, bookId, t)?.state === 'done'
+        const what = list.length > 1 ? (kindOf(t) === 'section' ? 'section' : 'chapter') : ''
+        return (
+          <Button key={recapId(bookId, t)} variant="outline" className="w-full min-w-0 justify-start" onClick={() => onRecap(t)} title="Recap (R)">
+            <NotebookPen className="size-4 shrink-0 text-link" />
+            <span className="shrink-0">{done ? (what ? `Your ${what} recap:` : 'Your recap:') : what ? `Recap ${what}:` : 'Recap:'}</span>
+            <span className="min-w-0 truncate font-normal text-body">{t.title}</span>
+          </Button>
+        )
+      })}
     </div>
   )
 }
 
 const cleanTitle = (t: string) => t.replace(/\s+/g, ' ').trim()
 
-function Contents({ outline, currentPage, onJump, chapterTitle, book, chapters, recaps, recapTarget, onRecap }: Props) {
+function Contents({ outline, currentPage, onJump, chapterTitle, book, chapters, sections, recaps, recapTarget, recapSection, onRecap }: Props) {
   if (!outline.length)
     return (
       <Empty icon={<ListTree className="size-5" />} title="No table of contents" body="This PDF doesn't include chapter bookmarks. Use the page scrubber or search to get around.">
         <div className="-mx-2 mt-5 text-left">
-          <RecapButton target={recapTarget} recaps={recaps} onRecap={onRecap} />
+          <RecapButtons targets={[recapTarget]} recaps={recaps} bookId={book.id} onRecap={onRecap} />
         </div>
         <div className="mt-3 grid grid-cols-5 gap-1.5 px-2">
           {Array.from({ length: Math.min(book.pageCount, 60) }, (_, i) => {
@@ -111,21 +126,26 @@ function Contents({ outline, currentPage, onJump, chapterTitle, book, chapters, 
         </div>
       </Empty>
     )
-  // Chapters (as recaps see them) matched by where they start and their title:
-  // written, waiting, or read and ready for one.
+  // Chapters and sections (as recaps see them) matched by where they start and
+  // their title: written, waiting — or, for chapters, read and ready for one.
+  // (Sections only get a tick once written, so long chapters stay tidy.)
   const read = readPagesOf(book)
   const recapOf: RecapOf = (it) => {
-    const c = it.page != null ? chapters.find((ch) => ch.start === it.page && ch.title === cleanTitle(it.title)) : undefined
+    if (it.page == null) return undefined
+    const title = cleanTitle(it.title)
+    const c =
+      chapters.find((ch) => ch.start === it.page && ch.title === title) ??
+      sections.find((s) => s.start === it.page && s.title.split(' · ').includes(title))
     if (!c) return undefined
-    const r = recaps.find((x) => x.start === c.start)
+    const r = recapFor(recaps, book.id, c)
     const open = () => onRecap(c)
     if (r?.state === 'done' || r?.state === 'due') return { state: r.state, open }
-    if (!r && c.end - c.start + 1 >= MIN_RECAP_PAGES && coverage(c, read) >= RECAP_COVERAGE) return { state: 'ready', open }
+    if (!r && kindOf(c) === 'chapter' && c.end - c.start + 1 >= MIN_RECAP_PAGES && coverage(c, read) >= RECAP_COVERAGE) return { state: 'ready', open }
     return undefined
   }
   return (
     <>
-      <RecapButton target={recapTarget} recaps={recaps} onRecap={onRecap} />
+      <RecapButtons targets={[recapSection, recapTarget]} recaps={recaps} bookId={book.id} onRecap={onRecap} />
       <ul>
         {outline.map((it, i) => (
           <OutlineNode key={i} item={it} depth={0} currentPage={currentPage} onJump={onJump} chapterTitle={chapterTitle} recapOf={recapOf} />

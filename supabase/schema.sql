@@ -91,7 +91,8 @@ create table if not exists public.irb_sessions (
   deleted     boolean not null default false
 );
 
--- chapter recaps: your three answers after each chapter (id = "{book_id}:{first page}")
+-- recaps: your three answers after each chapter or section
+-- (id = "{book_id}:{first page}" for chapters, "{book_id}:{first page}:{title hash}" for sections)
 create table if not exists public.irb_recaps (
   id          text primary key,
   user_id     uuid not null default auth.uid() references auth.users on delete cascade,
@@ -100,6 +101,8 @@ create table if not exists public.irb_recaps (
   end_page    int,
   chapter     text,
   sections    jsonb,
+  kind        text,
+  parent      text,
   answers     jsonb,
   state       text,
   created_at  bigint,
@@ -120,6 +123,8 @@ create table if not exists public.irb_profiles (
 alter table public.irb_books add column if not exists read_pages text;
 alter table public.irb_books add column if not exists read_pages_set_at bigint;
 alter table public.irb_books add column if not exists position_at bigint;
+alter table public.irb_recaps add column if not exists kind text;
+alter table public.irb_recaps add column if not exists parent text;
 
 -- ── triggers, indexes, row-level security (only you can see your rows)
 do $$

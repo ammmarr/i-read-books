@@ -1,19 +1,23 @@
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { MoreHorizontal, NotebookPen, X } from 'lucide-react'
-import type { Chapter } from '../../lib/recaps'
+import { kindOf, type Chapter } from '../../lib/recaps'
 import { Button } from '../ui/Button'
 import { Menu } from '../ui/Menu'
 
-/** After this long without an answer, the card folds into a small pill so it never sits on your page. */
-const FOLD_MS = 14_000
+/**
+ * After this long without an answer, the card folds into a small pill so it
+ * never sits on your page — sooner for sections, which come often.
+ */
+const FOLD_MS = { chapter: 14_000, section: 7_000 }
 
 /**
- * "Chapter finished — recall it?" Floats over the page without stopping you:
- * start now, later, skip this chapter, or turn recaps off for the book.
+ * "Chapter (or section) finished — recall it?" Floats over the page without
+ * stopping you: start now, later, skip it, ask only after chapters, or turn
+ * recaps off for the book.
  */
 export function RecapPromptCard({
-  chapter, waiting, className = '', onStart, onLater, onSkip, onOffForBook,
+  chapter, waiting, className = '', onStart, onLater, onSkip, onOffForBook, onChaptersOnly,
 }: {
   chapter: Chapter
   /** Finished earlier, recap still waiting (vs. just finished). */
@@ -23,13 +27,16 @@ export function RecapPromptCard({
   onLater: () => void
   onSkip: () => void
   onOffForBook: () => void
+  /** Sections only: stop asking after sections. */
+  onChaptersOnly?: () => void
 }) {
+  const kind = kindOf(chapter)
   const [folded, setFolded] = useState(false)
   useEffect(() => {
     setFolded(false)
-    const t = setTimeout(() => setFolded(true), FOLD_MS)
+    const t = setTimeout(() => setFolded(true), FOLD_MS[kind])
     return () => clearTimeout(t)
-  }, [chapter.start])
+  }, [chapter.start, chapter.title, kind])
 
   return (
     <motion.div
@@ -63,8 +70,11 @@ export function RecapPromptCard({
                 <NotebookPen className="size-[18px]" />
               </motion.span>
               <div className="min-w-0 flex-1">
-                <p className="text-label-sm text-ink">{waiting ? 'Your recap is waiting' : 'Chapter finished'}</p>
-                <p className="truncate text-body-sm text-mute">{chapter.title}</p>
+                <p className="text-label-sm text-ink">{waiting ? 'Your recap is waiting' : kind === 'section' ? 'Section finished' : 'Chapter finished'}</p>
+                <p className="truncate text-body-sm text-mute">
+                  {chapter.title}
+                  {kind === 'section' && chapter.parent ? <span className="text-faint"> · {chapter.parent}</span> : null}
+                </p>
               </div>
               <button onClick={onLater} aria-label="Later" className="-mr-1.5 -mt-1 grid size-8 shrink-0 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
                 <X className="size-4" />
@@ -86,7 +96,8 @@ export function RecapPromptCard({
                   </button>
                 )}
                 items={[
-                  { label: 'Skip this chapter', onSelect: onSkip },
+                  { label: kind === 'section' ? 'Skip this section' : 'Skip this chapter', onSelect: onSkip },
+                  ...(onChaptersOnly ? [{ label: 'Only ask after chapters', onSelect: onChaptersOnly }] : []),
                   { label: 'Don’t ask in this book', onSelect: onOffForBook },
                 ]}
               />

@@ -128,9 +128,14 @@ export interface Recap extends Synced {
   start: number
   /** Last page of the chapter (0-based, inclusive). */
   end: number
+  /** Title of the chapter — or of the section, for a section recap. */
   chapter: string
   /** Section titles inside the chapter, to check your recall against afterwards. */
   sections?: string[]
+  /** 'section' for a recap of one section inside a chapter (default 'chapter'). */
+  kind?: 'chapter' | 'section'
+  /** For a section: the chapter it's in. */
+  parent?: string
   answers: Partial<Record<RecapQuestion, string>>
   /** due: chapter finished, recap not written yet · done: saved · skipped: you passed on it. */
   state: 'due' | 'done' | 'skipped'

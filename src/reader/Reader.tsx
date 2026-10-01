@@ -29,7 +29,11 @@ import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { downloadBookFile, syncNow } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
 import { isNative, keepScreenOn, setImmersive } from '../lib/native'
-import { chapterForRecap, chaptersOf, coverage, lastFinishedChapter, markRecapDue, MIN_RECAP_PAGES, pagesChapter, RECAP_COVERAGE, setBookRecaps, useRecapPrefs, type Chapter } from '../lib/recaps'
+import {
+  chapterForRecap, chaptersOf, coverage, kindOf, lastFinishedChapter, markRecapDue, MIN_RECAP_PAGES, pagesChapter, RECAP_COVERAGE, recapId,
+  sectionForRecap, sectionsOf, setBookRecaps, setSectionRecaps, useRecapPrefs, type Chapter,
+} from '../lib/recaps'
+import { Menu } from '../components/ui/Menu'
 import { RecapWriter } from '../components/recap/RecapWriter'
 import { RecapPromptCard } from '../components/recap/RecapPrompt'
 
@@ -718,11 +722,13 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   )
   const chapter = chapterFor(currentPage)
 
-  // ── Chapter recaps ────────────────────────────────────────────────────
-  // Finish a chapter (most of its pages actually read, this visit) and a card
-  // offers three recall questions. Nothing blocks reading; "Later" leaves the
-  // recap waiting on the book's page.
+  // ── Chapter & section recaps ──────────────────────────────────────────
+  // Finish a chapter or a section inside one (most of its pages actually
+  // read, this visit) and a card offers three recall questions. Nothing blocks
+  // reading. "Later" leaves a chapter's recap waiting on the book's page;
+  // section prompts are lighter and simply pass.
   const chapters = useMemo(() => chaptersOf(outline, book.pageCount), [outline, book.pageCount])
+  const sections = useMemo(() => sectionsOf(chapters), [chapters])
   const recapsQ = useLiveQuery(() => db.recaps.where('bookId').equals(book.id).toArray(), [book.id])
   const recaps = recapsQ ?? NO_RECAPS
   const recapPrefs = useRecapPrefs()
@@ -731,7 +737,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const [writer, setWriter] = useState<{ chapter: Chapter; initial?: number | 'summary' } | null>(null)
   const writerOpen = useRef(false)
   writerOpen.current = !!writer
-  const recapOffered = useRef(new Set<number>())
+  const recapOffered = useRef(new Set<string>())
   /**
    * The first check runs where you left off: the chapter you finished last
    * time is offered too — even if you read it before recaps existed.
@@ -743,30 +749,48 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     const atOpen = firstCheck.current
     firstCheck.current = false
     const read = readSet.current
-    const c = lastFinishedChapter(chapters, currentPage, read)
-    if (!c || recapOffered.current.has(c.start)) return
-    const existing = recapsQ.find((r) => r.start === c.start)
+    const ch = lastFinishedChapter(chapters, currentPage, read)
+    // Sections only as you finish them (not "where you left off").
+    const sec = recapPrefs.sections && !atOpen ? lastFinishedChapter(sections, currentPage, read) : null
+    // The more recent of the two; a chapter's end stands for its last section too.
+    const c = sec && (!ch || sec.end > ch.end) ? sec : ch
+    if (!c) return
+    const id = recapId(book.id, c)
+    if (recapOffered.current.has(id)) return
+    const isSection = kindOf(c) === 'section'
+    const existing = recapsQ.find((r) => r.id === id) ?? (isSection ? undefined : recapsQ.find((r) => r.start === c.start && kindOf(r) === 'chapter'))
     if (existing && existing.state !== 'due') return
     if (!existing) {
       let fresh = atOpen
       for (let p = c.start; p <= c.end && !fresh; p++) fresh = sessionRead.current.has(p)
-      if (!fresh || c.end - c.start + 1 < MIN_RECAP_PAGES || coverage(c, read) < RECAP_COVERAGE) return
-      void markRecapDue(book.id, c)
+      if (!fresh || c.end - c.start + 1 < (isSection ? 1 : MIN_RECAP_PAGES) || coverage(c, read) < RECAP_COVERAGE) return
+      if (!isSection) void markRecapDue(book.id, c)
     }
-    recapOffered.current.add(c.start)
+    recapOffered.current.add(id)
     setRecapPrompt({ chapter: c, waiting: !!existing })
-  }, [recapsOn, chapters, recapsQ, currentPage, readN, writer, book.id])
+  }, [recapsOn, recapPrefs.sections, chapters, sections, recapsQ, currentPage, readN, writer, book.id])
 
   const openRecap = useCallback((c: Chapter, initial?: number | 'summary') => {
     setRecapPrompt(null)
     setSidebar((s) => ({ ...s, open: false }))
     setWriter({ chapter: c, initial })
   }, [])
-  /** Recap the chapter you're in (or the one you just left); without a table of contents, the pages since your last recap. */
+  /**
+   * What "Recap" means right now: the section you're in and its chapter (or
+   * the one you just left); without a table of contents, the pages since
+   * your last recap.
+   */
+  const recapTargets = useMemo(
+    () =>
+      chapters.length
+        ? { chapter: chapterForRecap(chapters, currentPage), section: sectionForRecap(sections, currentPage) }
+        : { chapter: pagesChapter(recaps, currentPage), section: null },
+    [chapters, sections, currentPage, recaps],
+  )
   const recapHere = useCallback(() => {
-    const c = chapters.length ? chapterForRecap(chapters, currentPage) : pagesChapter(recaps, currentPage)
+    const c = (recapPrefs.sections && recapTargets.section) || recapTargets.chapter
     if (c) openRecap(c)
-  }, [chapters, currentPage, recaps, openRecap])
+  }, [recapTargets, recapPrefs.sections, openRecap])
   const skipRecap = useCallback(
     async (c: Chapter) => {
       setRecapPrompt(null)
@@ -776,6 +800,11 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     },
     [book.id, toast],
   )
+  const chaptersOnly = useCallback(() => {
+    setRecapPrompt(null)
+    setSectionRecaps(false)
+    toast({ message: 'Recaps after chapters only', description: 'Change it any time in Settings.', action: { label: 'Undo', onClick: () => setSectionRecaps(true) } })
+  }, [toast])
   const recapsOffForBook = useCallback(() => {
     setRecapPrompt(null)
     setBookRecaps(book.id, false)
@@ -1322,9 +1351,29 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
                   {formatDuration(sessionSeconds)}
                 </div>
               )}
-              <IconButton label="Recap this chapter (R)" tipBelow className="hidden sm:inline-flex" onClick={recapHere}>
-                <NotebookPen className="size-[18px]" />
-              </IconButton>
+              {recapTargets.section && recapTargets.chapter ? (
+                <Menu
+                  label="Recap"
+                  trigger={(p) => (
+                    <IconButton {...p} label="Recap (R)" tipBelow className="hidden sm:inline-flex">
+                      <NotebookPen className="size-[18px]" />
+                    </IconButton>
+                  )}
+                  items={[recapTargets.section, recapTargets.chapter].map((u) => ({
+                    label: (
+                      <span className="block min-w-0">
+                        <span className="block text-label-sm">{kindOf(u) === 'section' ? 'This section' : 'This chapter'}</span>
+                        <span className="block truncate text-body-sm text-mute">{u.title}</span>
+                      </span>
+                    ),
+                    onSelect: () => openRecap(u),
+                  }))}
+                />
+              ) : (
+                <IconButton label="Recap this chapter (R)" tipBelow className="hidden sm:inline-flex" onClick={recapHere}>
+                  <NotebookPen className="size-[18px]" />
+                </IconButton>
+              )}
               <IconButton
                 label={view.mode === 'width' ? 'Back to normal width (Ctrl+F)' : 'Fit to width (Ctrl+F)'}
                 tipBelow
@@ -1483,9 +1532,11 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
 
       {/* Chapter finished → recap (gone by itself if it gets written on another device) */}
       <AnimatePresence>
-        {recapPrompt && !(mobile && (elsewhere || linkReturn)) && recaps.find((r) => r.start === recapPrompt.chapter.start)?.state === 'due' && (
+        {recapPrompt &&
+          !(mobile && (elsewhere || linkReturn)) &&
+          !['done', 'skipped'].includes(recaps.find((r) => r.id === recapId(book.id, recapPrompt.chapter))?.state ?? '') && (
           <RecapPromptCard
-            key={recapPrompt.chapter.start}
+            key={recapId(book.id, recapPrompt.chapter)}
             chapter={recapPrompt.chapter}
             waiting={recapPrompt.waiting}
             className={`absolute left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:translate-x-0 transition-[bottom] duration-300 ${
@@ -1495,6 +1546,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
             onLater={() => setRecapPrompt(null)}
             onSkip={() => skipRecap(recapPrompt.chapter)}
             onOffForBook={recapsOffForBook}
+            onChaptersOnly={kindOf(recapPrompt.chapter) === 'section' ? chaptersOnly : undefined}
           />
         )}
       </AnimatePresence>
@@ -1564,7 +1616,9 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         chapterFor={chapterFor}
         chapters={chapters}
         recaps={recaps}
-        recapTarget={chapters.length ? chapterForRecap(chapters, currentPage) : pagesChapter(recaps, currentPage)}
+        recapTarget={recapTargets.chapter}
+        recapSection={recapPrefs.sections ? recapTargets.section : null}
+        sections={sections}
         onRecap={(c) => openRecap(c)}
       />
       <ReaderSettings

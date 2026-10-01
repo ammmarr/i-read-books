@@ -3,18 +3,19 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { Copy, Eye, EyeOff, NotebookPen, Pencil, Trash2 } from 'lucide-react'
 import { db, type Book, type Highlight, type Recap, type RecapQuestion } from '../../db/db'
-import { pageRange, RECAP_QUESTIONS, recapsMarkdown, setBookRecaps, setRecapsEnabled, useRecapPrefs, type Chapter } from '../../lib/recaps'
+import { groupRecaps, kindOf, pageRange, questionTitle, RECAP_QUESTIONS, recapsMarkdown, setBookRecaps, setRecapsEnabled, unitOf, useRecapPrefs, type Chapter } from '../../lib/recaps'
 import { relativeTime } from '../../lib/format'
 import { Button, IconButton } from '../ui/Button'
 import { useToast } from '../ui/Toast'
 import { RecapWriter } from './RecapWriter'
 
-const asChapter = (r: Recap): Chapter => ({ title: r.chapter, start: r.start, end: r.end, sections: r.sections ?? [] })
+const asChapter = unitOf
 const NO_RECAPS: Recap[] = []
 
 /**
- * Your chapter recaps for a book, in reading order. "Test yourself" hides the
- * answers so you can recall each one before revealing it.
+ * Your recaps for a book, in reading order — each chapter's, with its
+ * sections' underneath. "Test yourself" hides the answers so you can recall
+ * each one before revealing it.
  */
 export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpToHighlight?: (h: Highlight) => void }) {
   const { toast } = useToast()
@@ -41,7 +42,7 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
     <section className="mt-10">
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <h2 className="mr-auto text-heading-md text-ink">
-          Chapter recaps <span className="text-body-md tabular text-faint">{done.length}</span>
+          Recaps <span className="text-body-md tabular text-faint">{done.length}</span>
         </h2>
         {done.length > 0 && (
           <>
@@ -104,17 +105,47 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
       {done.length === 0 ? (
         due.length === 0 && (
           <div className="rounded-md border border-dashed border-hairline px-6 py-10 text-center text-body-md text-mute">
-            When you finish a chapter, you’ll be asked three quick questions — what you learned, a real example, and what you’ll do with it. Your answers collect here to revisit.
+            When you finish a chapter{prefs.sections ? ' or a section' : ''}, you’ll be asked three quick questions — what you learned, a real example, and what you’ll do with it. Your answers collect here to revisit.
           </div>
         )
       ) : (
-        <ul className="grid gap-3">
-          <AnimatePresence initial={false}>
-            {done.map((r) => (
-              <RecapCard key={r.id} recap={r} test={test} onEdit={() => setWriter({ chapter: asChapter(r), initial: 0 })} onOpen={() => setWriter({ chapter: asChapter(r), initial: 'summary' })} onDelete={() => remove(r)} />
-            ))}
-          </AnimatePresence>
-        </ul>
+        <div className="space-y-6">
+          {groupRecaps(done).map((g) => (
+            <div key={g.title}>
+              {!g.chapter && <h3 className="mb-2 text-label-sm text-mute">{g.title}</h3>}
+              <ul className="grid gap-3">
+                <AnimatePresence initial={false}>
+                  {g.chapter && (
+                    <RecapCard
+                      key={g.chapter.id}
+                      recap={g.chapter}
+                      test={test}
+                      onEdit={() => setWriter({ chapter: asChapter(g.chapter!), initial: 0 })}
+                      onOpen={() => setWriter({ chapter: asChapter(g.chapter!), initial: 'summary' })}
+                      onDelete={() => remove(g.chapter!)}
+                    />
+                  )}
+                </AnimatePresence>
+              </ul>
+              {g.sections.length > 0 && (
+                <ul className={`grid gap-2 ${g.chapter ? 'ml-3 mt-2 border-l-2 border-hairline pl-3 sm:ml-5 sm:pl-4' : ''}`}>
+                  <AnimatePresence initial={false}>
+                    {g.sections.map((r) => (
+                      <RecapCard
+                        key={r.id}
+                        recap={r}
+                        test={test}
+                        onEdit={() => setWriter({ chapter: asChapter(r), initial: 0 })}
+                        onOpen={() => setWriter({ chapter: asChapter(r), initial: 'summary' })}
+                        onDelete={() => remove(r)}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
       )}
 
       <RecapWriter chapter={writer?.chapter ?? null} initial={writer?.initial} bookId={book.id} onClose={() => setWriter(null)} onJumpToHighlight={onJumpToHighlight} />
@@ -126,10 +157,18 @@ function RecapCard({ recap: r, test, onEdit, onOpen, onDelete }: { recap: Recap;
   const [shown, setShown] = useState<Set<RecapQuestion>>(new Set())
   useEffect(() => setShown(new Set()), [test])
   const reveal = (k: RecapQuestion) => setShown((s) => new Set([...s, k]))
+  const section = kindOf(r) === 'section'
   return (
-    <motion.li layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97 }} className="rounded-md border border-hairline bg-canvas-elevated p-4 sm:p-5">
+    <motion.li
+      layout
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.97 }}
+      className={`rounded-md border border-hairline bg-canvas-elevated ${section ? 'p-3.5 sm:p-4' : 'p-4 sm:p-5'}`}
+    >
       <div className="flex items-start gap-2">
         <button onClick={onOpen} className="min-w-0 flex-1 text-left">
+          {section && <div className="text-mono-eyebrow text-faint">Section</div>}
           <h3 className="text-label-sm text-ink hover:underline">{r.chapter}</h3>
           <p className="mt-0.5 text-body-sm text-faint">
             {[pageRange({ title: r.chapter, start: r.start, end: r.end }), relativeTime(r.updatedAt)].filter(Boolean).join(' · ')}
@@ -142,13 +181,13 @@ function RecapCard({ recap: r, test, onEdit, onOpen, onDelete }: { recap: Recap;
           <Trash2 className="size-3.5" />
         </IconButton>
       </div>
-      <dl className="mt-4 space-y-4">
+      <dl className={section ? 'mt-3 space-y-3' : 'mt-4 space-y-4'}>
         {RECAP_QUESTIONS.map((q) => {
           const a = r.answers[q.key]?.trim()
           const hidden = test && !!a && !shown.has(q.key)
           return (
             <div key={q.key}>
-              <dt className="text-body-sm font-medium text-mute">{test ? q.title : q.label}</dt>
+              <dt className="text-body-sm font-medium text-mute">{test ? questionTitle(q, kindOf(r)) : q.label}</dt>
               <dd className={`relative mt-1 ${hidden ? 'min-h-11' : ''}`}>
                 {a ? (
                   <p

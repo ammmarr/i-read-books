@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowLeft, ArrowRight, Check, ListChecks, Pencil, X } from 'lucide-react'
 import { db, type Highlight, type Recap, type RecapQuestion } from '../../db/db'
-import { findRecap, hasAnswers, pageRange, recapId, RECAP_QUESTIONS, type Chapter } from '../../lib/recaps'
+import { findRecap, hasAnswers, kindOf, pageRange, questionTitle, recapId, RECAP_QUESTIONS, type Chapter } from '../../lib/recaps'
 import { formatDate } from '../../lib/format'
 import { vibrate } from '../../lib/hooks'
 import { swatchOf } from '../../reader/HighlightTools'
@@ -32,7 +32,7 @@ interface Props {
  */
 export function RecapWriter({ chapter, ...rest }: Props) {
   return createPortal(
-    <AnimatePresence>{chapter && <Writer key={`${rest.bookId}:${chapter.start}`} chapter={chapter} {...rest} />}</AnimatePresence>,
+    <AnimatePresence>{chapter && <Writer key={recapId(rest.bookId, chapter)} chapter={chapter} {...rest} />}</AnimatePresence>,
     document.body,
   )
 }
@@ -54,7 +54,7 @@ function Writer({ chapter, bookId, initial, onClose, onJumpToHighlight }: Props 
 
   useEffect(() => {
     let alive = true
-    findRecap(bookId, chapter.start).then((r) => {
+    findRecap(bookId, chapter).then((r) => {
       if (!alive) return
       rec.current = r ?? null
       setAnswers(r?.answers ?? {})
@@ -66,7 +66,7 @@ function Writer({ chapter, bookId, initial, onClose, onJumpToHighlight }: Props 
     return () => {
       alive = false
     }
-  }, [bookId, chapter.start, initial])
+  }, [bookId, chapter, initial])
 
   /** Writes the recap. Nothing is stored until you've written something. */
   const save = useCallback(
@@ -74,13 +74,16 @@ function Writer({ chapter, bookId, initial, onClose, onJumpToHighlight }: Props 
       const next = answersRef.current
       const c = chapterRef.current
       // One recap per chapter: pick up a row made meanwhile (e.g. the "chapter finished" prompt).
-      const cur = rec.current ?? (await findRecap(bookId, c.start)) ?? null
+      const cur = rec.current ?? (await findRecap(bookId, c)) ?? null
       if (!cur && !hasAnswers({ answers: next })) return
       const now = Date.now()
       const r: Recap = cur
         ? // Writing in a recap you'd skipped puts it back on your list.
           { ...cur, answers: next, updatedAt: now, ...(state ? { state, reviewedAt: now } : cur.state === 'skipped' ? { state: 'due' as const } : {}) }
-        : { id: recapId(bookId, c.start), bookId, start: c.start, end: c.end, chapter: c.title, sections: c.sections, answers: next, state: state ?? 'due', createdAt: now, updatedAt: now }
+        : {
+            id: recapId(bookId, c), bookId, start: c.start, end: c.end, chapter: c.title, sections: c.sections, kind: kindOf(c), parent: c.parent,
+            answers: next, state: state ?? 'due', createdAt: now, updatedAt: now,
+          }
       rec.current = r
       dirtyRef.current = false
       await db.recaps.put(r)
@@ -166,7 +169,7 @@ function Writer({ chapter, bookId, initial, onClose, onJumpToHighlight }: Props 
             <X className="size-[18px]" />
           </button>
           <div className="min-w-0 flex-1">
-            <div className="text-mono-eyebrow text-mute">Chapter recap</div>
+            <div className="text-mono-eyebrow text-mute">{kindOf(chapter) === 'section' ? `Section recap${chapter.parent ? ` · ${chapter.parent}` : ''}` : 'Chapter recap'}</div>
             <div className="truncate text-label-sm text-ink">{chapter.title}</div>
           </div>
           <div className="flex items-center gap-1.5" aria-hidden>
@@ -207,7 +210,7 @@ function Writer({ chapter, bookId, initial, onClose, onJumpToHighlight }: Props 
                   <div className="text-mono-eyebrow text-mute">
                     Question {step + 1} of {SUMMARY}
                   </div>
-                  <h2 className="mt-3 text-[24px] font-semibold leading-8 tracking-[-0.8px] text-ink sm:text-[30px] sm:leading-[38px] sm:tracking-[-1.1px]">{q.title}</h2>
+                  <h2 className="mt-3 text-[24px] font-semibold leading-8 tracking-[-0.8px] text-ink sm:text-[30px] sm:leading-[38px] sm:tracking-[-1.1px]">{questionTitle(q, kindOf(chapter))}</h2>
                   <p className="mt-2 text-body-md text-mute">{q.hint}</p>
                   <textarea
                     ref={areaMounted}
@@ -363,7 +366,9 @@ function Summary({
           <h3 className="flex items-center gap-2 text-label-sm text-ink">
             <ListChecks className="size-4 text-link" /> Check yourself
           </h3>
-          <p className="mt-1 text-body-md text-mute">What the chapter covered — anything you forgot? Add it to your recap while it’s fresh.</p>
+          <p className="mt-1 text-body-md text-mute">
+            {sections.length ? 'What the chapter covered' : 'What you marked in this section'} — anything you forgot? Add it to your recap while it’s fresh.
+          </p>
           {sections.length > 0 && (
             <ul className="mt-4 flex flex-wrap gap-1.5">
               {sections.map((s, i) => (
