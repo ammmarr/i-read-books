@@ -265,6 +265,43 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
   box-shadow: 0 1px 3px rgba(0,0,0,0.2);
 }
 
+/* Night Shift warmth: the track runs from barely warm to candle-light amber. */
+.warmth-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 28px;
+  background: transparent;
+  cursor: pointer;
+}
+.warmth-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #fff4e3, #ffc27a, #ff9329);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+}
+.warmth-range::-moz-range-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #fff4e3, #ffc27a, #ff9329);
+}
+.warmth-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 20px; height: 20px; margin-top: -7px;
+  border-radius: 9999px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  transition: transform 150ms var(--ease-out-quart);
+}
+.warmth-range:active::-webkit-slider-thumb { transform: scale(1.2); }
+.warmth-range::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 9999px;
+  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

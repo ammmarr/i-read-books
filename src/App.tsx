@@ -11,6 +11,7 @@ import SettingsPage from './pages/Settings'
 import BookDetail from './pages/BookDetail'
 import Reader from './reader/Reader'
 import { AuthNotices, PasswordRecovery, Welcome } from './components/auth/Welcome'
+import { NightShiftLayer } from './components/NightShift'
 
 const routes: RouteObject[] = [
   {
@@ -58,6 +59,7 @@ export default function App() {
             <Welcome />
             <AuthNotices />
             <PasswordRecovery />
+            <NightShiftLayer />
           </ImportProvider>
         </ToastProvider>
       </HashRouter>

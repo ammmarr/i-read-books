@@ -3,6 +3,7 @@ import { Sheet } from '../components/ui/Sheet'
 import { Segmented } from '../components/ui/Segmented'
 import { updateSettings, useSettings, type PageTheme, type ZoomMode } from '../lib/settings'
 import { setTheme, useIsDark } from '../lib/theme'
+import { NightShiftQuick } from '../components/NightShift'
 
 interface Props {
   open: boolean
@@ -44,6 +45,10 @@ export function ReaderSettings({ open, onClose, zoomMode, zoomPercent, onZoomMod
             )
           })}
         </div>
+      </Section>
+
+      <Section label="Night Shift">
+        <NightShiftQuick />
       </Section>
 
       <Section label="Zoom">

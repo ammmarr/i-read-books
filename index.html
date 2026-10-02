@@ -18,6 +18,13 @@
         var t = localStorage.getItem('irb-theme') || 'system'
         var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
         if (dark) document.documentElement.classList.add('dark')
+        // Night Shift already on? Warm the boot screen as well (full logic in src/lib/nightShift.ts).
+        var s = JSON.parse(localStorage.getItem('irb-settings') || '{}')
+        var o = s.nightShiftOverride, d = new Date(), n = d.getHours() * 60 + d.getMinutes()
+        var mm = function (x) { var p = String(x || '0:0').split(':'); return (+p[0] * 60 + +(p[1] || 0)) % 1440 }
+        var a = mm(s.nightShiftFrom || '21:00'), b = mm(s.nightShiftTo || '07:00')
+        var on = o && o.until > Date.now() ? o.on : s.nightShift === 'on' || (s.nightShift === 'scheduled' && a !== b && (a < b ? n >= a && n < b : n >= a || n < b))
+        if (on) document.documentElement.classList.add('night-shift')
       } catch (e) {}
     </script>
     <style>
@@ -40,6 +47,10 @@
         height: min(30vh, 170px);
         width: auto;
         overflow: visible;
+      }
+      .night-shift #boot {
+        color: #f4c08a;
+        --logo-glint: #ffb15a;
       }
       /*logo-css*/
     </style>

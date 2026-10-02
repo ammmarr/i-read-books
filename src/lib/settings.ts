@@ -17,6 +17,15 @@ export interface Settings {
   recapSections: boolean
   /** Books where you said "don't ask" for recaps. */
   recapsOffBooks: string[]
+  /** Night Shift (warm screen) — this device only. See lib/nightShift.ts. */
+  nightShift: 'off' | 'on' | 'scheduled'
+  /** 0 (a hint) – 1 (deep amber). */
+  nightShiftWarmth: number
+  /** Schedule, "HH:MM". */
+  nightShiftFrom: string
+  nightShiftTo: string
+  /** Switched by hand while scheduled: holds until the schedule next changes over. */
+  nightShiftOverride: { on: boolean; until: number } | null
 }
 
 const DEFAULTS: Settings = {
@@ -29,6 +38,11 @@ const DEFAULTS: Settings = {
   chapterRecaps: true,
   recapSections: true,
   recapsOffBooks: [],
+  nightShift: 'off',
+  nightShiftWarmth: 0.45,
+  nightShiftFrom: '21:00',
+  nightShiftTo: '07:00',
+  nightShiftOverride: null,
 }
 
 const KEY = 'irb-settings'

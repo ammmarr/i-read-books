@@ -17,6 +17,7 @@ import { cloudEnabled } from '../lib/supabase'
 import { setRecapsEnabled, setSectionRecaps, useRecapPrefs } from '../lib/recaps'
 import { applyUpdate, checkForUpdate, useUpdate, versionLabel } from '../lib/update'
 import { Logo } from '../components/Logo'
+import { NightShiftSettings } from '../components/NightShift'
 
 const GOALS = [10, 15, 20, 30, 45, 60]
 
@@ -104,6 +105,9 @@ export default function SettingsPage() {
             ]}
           />
         </Row>
+        <div className="mt-3 border-t border-hairline pt-4">
+          <NightShiftSettings />
+        </div>
       </Group>
 
       <Group title="Reading">
