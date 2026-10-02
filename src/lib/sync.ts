@@ -300,8 +300,38 @@ function refreshWarning() {
   set({ warning: parts.length ? `${parts.join(' ')} Run the latest supabase/schema.sql once to finish the update.` : null })
 }
 
+/**
+ * A signed-in session whose access token is good for a while yet — refreshed
+ * first if it's (nearly) expired, or when `force`d. Without one, requests go
+ * out anonymous and the database refuses every write ("new row violates
+ * row-level security policy"). Happens after waking a tablet or laptop: the
+ * token has expired and its refresh failed while the network reconnected.
+ */
+async function freshSession(force = false) {
+  const sb = supabase!
+  const { data } = await sb.auth.getSession()
+  const s = data.session
+  if (!s) return null
+  if (!force && (s.expires_at ?? 0) * 1000 > Date.now() + 120_000) return s
+  const r = await sb.auth.refreshSession()
+  return r.data.session ?? null
+}
+
+/** The database refused a write for lack of a (valid) sign-in. */
+const isAuthRefusal = (e: unknown) => {
+  const x = e as { code?: string; message?: string } | null
+  return x?.code === '42501' || /row-level security|JWT|not authenticated/i.test(x?.message ?? '')
+}
+
+class SignInError extends Error {
+  constructor() {
+    super('Your sign-in needs renewing — sync will keep trying. If this message stays, sign out and back in (Settings → Account).')
+  }
+}
+
 async function upsertRows(table: string, rows: Row[]) {
   const sb = supabase!
+  let renewed = false
   for (let attempt = 0; attempt < 8; attempt++) {
     const skip = missingColumns.get(table)
     const payload = skip?.size ? rows.map((r) => Object.fromEntries(Object.entries(r).filter(([k]) => !skip.has(k)))) : rows
@@ -311,6 +341,14 @@ async function upsertRows(table: string, rows: Row[]) {
     if (col && !skip?.has(col)) {
       noteMissingColumn(table, col)
       continue
+    }
+    if (isAuthRefusal(error)) {
+      // Renew the sign-in once and try again; still refused → say so plainly.
+      if (!renewed && (await freshSession(true).catch(() => null))) {
+        renewed = true
+        continue
+      }
+      throw new SignInError()
     }
     throw error
   }
@@ -340,6 +378,8 @@ async function push(userId: string) {
         noteTable(REMOTE[t], true)
         continue
       }
+      // Without a valid sign-in nothing else will save either: stop here.
+      if (e instanceof SignInError) throw e
       console.warn(`sync: pushing ${t} failed`, e)
       firstError ??= e
     }
@@ -355,7 +395,7 @@ async function push(userId: string) {
       for (let i = 0; i < ids.length; i += 200) {
         const chunk = ids.slice(i, i + 200)
         const { error } = await sb.from(REMOTE[t]).update({ deleted: true, updated_at: Date.now() }).in('id', chunk)
-        if (error) throw error
+        if (error) throw isAuthRefusal(error) ? new SignInError() : error
         if (t === 'books') {
           await sb.storage.from(BUCKET).remove(chunk.flatMap((id) => [`${userId}/${id}.pdf`, `${userId}/${id}.jpg`]))
         }
@@ -372,7 +412,9 @@ async function uploadFiles(userId: string) {
   let changed = false
   const books = await db.books.toArray()
   for (const b of books) {
-    if (b.pageCount > 0 && !b.filePath && !b.uploadError) {
+    // An upload refused for lack of a sign-in (not size etc.) gets another go.
+    const retry = !b.uploadError || isAuthRefusal({ message: b.uploadError })
+    if (b.pageCount > 0 && !b.filePath && retry) {
       const file = await db.files.get(b.id)
       if (file) {
         if (file.blob.size > MAX_UPLOAD) {
@@ -451,11 +493,21 @@ export function syncNow(): Promise<void> {
 
 async function runOnce() {
   if (!supabase) return set({ status: 'off' })
-  const session = getAuthSession()
-  if (!session) return set({ status: 'signed-out' })
+  if (!getAuthSession()) return set({ status: 'signed-out' })
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return set({ status: 'offline' })
-  const userId = session.user.id
   set({ status: 'syncing', error: null })
+  // Make sure requests carry a valid sign-in before reading or writing anything.
+  const session = await freshSession().catch(() => null)
+  if (!session) {
+    // Signed out for good → the auth listener shows "signed out"; otherwise
+    // (network still waking up) just try again shortly.
+    if (getAuthSession()) {
+      set({ status: navigator.onLine === false ? 'offline' : 'idle' })
+      scheduleSync(15_000)
+    }
+    return
+  }
+  const userId = session.user.id
   try {
     await pull(userId)
     await push(userId)
