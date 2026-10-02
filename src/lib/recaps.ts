@@ -57,9 +57,15 @@ export const hasAnswers = (r: Pick<Recap, 'answers'> | undefined) => !!r && RECA
 /** Something you can recap: a chapter, or a section inside one. */
 export interface Chapter {
   title: string
-  /** 0-based, inclusive. */
+  /** 0-based, inclusive: the pages it's on. */
   start: number
   end: number
+  /**
+   * Exact extent as book positions (page + how far down it, 0–1): from its
+   * heading to where the next heading begins — its last line.
+   */
+  from?: number
+  to?: number
   /** Titles of the sections inside it (from the table of contents). */
   sections: string[]
   /** Default 'chapter'. */
@@ -83,35 +89,50 @@ export const MIN_RECAP_PAGES = 5
 /** Share of a chapter's pages you must have actually read before it asks. */
 export const RECAP_COVERAGE = 0.75
 
-interface Node {
+interface Kid {
   title: string
   page: number
+  /** Book position of its heading: page + how far down (0–1). */
+  pos: number
+}
+interface Node extends Kid {
   depth: number
   leaf: boolean
   /** Direct children with a page: the sections, if this turns out to be a chapter. */
-  kids: { title: string; page: number }[]
+  kids: Kid[]
+}
+
+/** Book position of an outline entry (top of the page when the PDF doesn't say). */
+const posOf = (it: OutlineItem) => it.page! + Math.min(0.99, Math.max(0, it.top ?? 0))
+
+/**
+ * The page holding a unit's last line, given where the next heading begins.
+ * A heading near the top of a page means the unit ended on the page before.
+ */
+function lastPage(to: number, start: number) {
+  const p = Math.floor(to + 1e-9)
+  return Math.max(start, to - p < 0.15 ? p - 1 : p)
 }
 
 /**
- * A chapter's sections with page ranges. Sections starting on the same page
- * become one ("A · B"); the last runs to the end of the chapter.
+ * A chapter's sections, each running from its heading to the next one (the
+ * last to the end of the chapter). Entries pointing at the same spot merge
+ * into one ("A · B").
  */
-function partsOf(chapter: Chapter, kids: Node['kids']): Chapter[] {
-  const ks = kids.filter((k) => k.page >= chapter.start && k.page <= chapter.end && k.title && !isMatter(k.title)).sort((a, b) => a.page - b.page)
-  const merged: { title: string; page: number }[] = []
+function partsOf(chapter: Chapter, kids: Kid[]): Chapter[] {
+  const from = chapter.from ?? chapter.start
+  const to = chapter.to ?? chapter.end + 1
+  const ks = kids.filter((k) => k.pos >= from - 1e-6 && k.pos < to && k.title && !isMatter(k.title)).sort((a, b) => a.pos - b.pos)
+  const merged: Kid[] = []
   for (const k of ks) {
     const last = merged[merged.length - 1]
-    if (last && last.page === k.page) last.title = `${last.title} · ${k.title}`
+    if (last && k.pos - last.pos < 0.01) last.title = `${last.title} · ${k.title}`
     else merged.push({ ...k })
   }
-  return merged.map((k, i) => ({
-    title: k.title,
-    start: k.page,
-    end: i + 1 < merged.length ? merged[i + 1].page - 1 : chapter.end,
-    sections: [],
-    kind: 'section' as const,
-    parent: chapter.title,
-  }))
+  return merged.map((k, i) => {
+    const end = i + 1 < merged.length ? merged[i + 1].pos : to
+    return { title: k.title, start: k.page, end: lastPage(end, k.page), from: k.pos, to: end, sections: [], kind: 'section' as const, parent: chapter.title }
+  })
 }
 
 /**
@@ -132,9 +153,10 @@ export function chaptersOf(outline: OutlineItem[], pageCount: number): Chapter[]
         nodes.push({
           title: clean(it.title),
           page: it.page,
+          pos: posOf(it),
           depth,
           leaf: !kids.length,
-          kids: kids.filter((c) => c.page != null).map((c) => ({ title: clean(c.title), page: c.page! })),
+          kids: kids.filter((c) => c.page != null && c.page < pageCount).map((c) => ({ title: clean(c.title), page: c.page!, pos: posOf(c) })),
         })
       walk(it.items, depth + 1)
     }
@@ -144,14 +166,17 @@ export function chaptersOf(outline: OutlineItem[], pageCount: number): Chapter[]
   const maxDepth = Math.min(3, Math.max(...nodes.map((n) => n.depth)))
 
   const at = (level: number): Chapter[] => {
-    const bounds = [...new Set(nodes.filter((n) => n.depth <= level).map((n) => n.page))].sort((a, b) => a - b)
+    const bounds = [...new Set(nodes.filter((n) => n.depth <= level).map((n) => n.pos))].sort((a, b) => a - b)
     const seen = new Set<number>()
     const out: Chapter[] = []
-    for (const n of [...nodes].sort((a, b) => a.page - b.page || a.depth - b.depth)) {
+    for (const n of [...nodes].sort((a, b) => a.pos - b.pos || a.depth - b.depth)) {
       if (!(n.depth === level || (n.depth < level && n.leaf)) || isMatter(n.title) || seen.has(n.page)) continue
       seen.add(n.page)
-      const next = bounds.find((p) => p > n.page)
-      const c: Chapter = { title: n.title, start: n.page, end: (next ?? pageCount) - 1, sections: n.kids.map((k) => k.title).filter((t) => t && !isMatter(t)) }
+      const to = bounds.find((p) => p > n.pos + 1e-6) ?? pageCount
+      const c: Chapter = {
+        title: n.title, start: n.page, end: lastPage(to, n.page), from: n.pos, to,
+        sections: n.kids.map((k) => k.title).filter((t) => t && !isMatter(t)),
+      }
       c.parts = partsOf(c, n.kids)
       out.push(c)
     }

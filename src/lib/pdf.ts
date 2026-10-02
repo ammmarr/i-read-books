@@ -152,20 +152,25 @@ export async function readLinks(page: PDFPageProxy): Promise<PdfLink[]> {
 export interface OutlineItem {
   title: string
   page: number | null
+  /** How far down the page the heading sits (0–1), when the PDF says. */
+  top?: number
   items: OutlineItem[]
 }
 
 export async function readOutline(doc: PDFDocumentProxy): Promise<OutlineItem[]> {
   const raw = await doc.getOutline().catch(() => null)
   if (!raw) return []
-  const resolve = async (dest: unknown) => (await resolveDest(doc, dest))?.page ?? null
   const walk = async (items: typeof raw): Promise<OutlineItem[]> =>
     Promise.all(
-      items.map(async (it) => ({
-        title: it.title,
-        page: await resolve(it.dest),
-        items: it.items?.length ? await walk(it.items) : [],
-      })),
+      items.map(async (it) => {
+        const t = await resolveDest(doc, it.dest)
+        return {
+          title: it.title,
+          page: t?.page ?? null,
+          top: t?.top,
+          items: it.items?.length ? await walk(it.items) : [],
+        }
+      }),
     )
   return walk(raw)
 }

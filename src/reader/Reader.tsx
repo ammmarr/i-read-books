@@ -503,9 +503,12 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     return db.books.update(book.id, { currentPage: cp, pageOffset: offset, positionAt: at, lastOpenedAt: at })
   }, [book.id, pageAt])
 
+  /** Chapter/section recaps watch the reading position (set up further down). */
+  const recapCheck = useRef<() => void>(undefined)
   const onScroll = useCallback(() => {
     const el = scroller.current
     if (!el) return
+    recapCheck.current?.()
     const st = el.scrollTop
     const vh = el.clientHeight
     const L = layoutRef.current
@@ -570,8 +573,6 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   // reading time. Jumping to page 200, scrubbing or flicking past pages
   // doesn't count, so progress reflects reading, not browsing.
   const readSet = useRef<Set<number>>(readPagesOf(book))
-  /** Pages that became "read" during this visit — only freshly finished chapters ask for a recap. */
-  const sessionRead = useRef(new Set<number>())
   const [readN, setReadN] = useState(() => readSet.current.size)
   const dwellCache = useRef(new Map<number, number>())
   const dwellFor = useCallback(
@@ -595,7 +596,6 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     (page: number) => {
       if (readSet.current.has(page)) return
       readSet.current.add(page)
-      sessionRead.current.add(page)
       setReadN(readSet.current.size)
       clearTimeout(readSaveTimer.current)
       readSaveTimer.current = setTimeout(() => {
@@ -723,10 +723,10 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const chapter = chapterFor(currentPage)
 
   // ── Chapter & section recaps ──────────────────────────────────────────
-  // Finish a chapter or a section inside one (most of its pages actually
-  // read, this visit) and a card offers three recall questions. Nothing blocks
-  // reading. "Later" leaves a chapter's recap waiting on the book's page;
-  // section prompts are lighter and simply pass.
+  // Reach the last line of a chapter or of a section inside one — having read
+  // it, not skimmed or jumped — and a card offers three recall questions.
+  // Nothing blocks reading. "Later" leaves a chapter's recap waiting on the
+  // book's page; section prompts are lighter and simply pass.
   const chapters = useMemo(() => chaptersOf(outline, book.pageCount), [outline, book.pageCount])
   const sections = useMemo(() => sectionsOf(chapters), [chapters])
   const recapsQ = useLiveQuery(() => db.recaps.where('bookId').equals(book.id).toArray(), [book.id])
@@ -738,37 +738,99 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const writerOpen = useRef(false)
   writerOpen.current = !!writer
   const recapOffered = useRef(new Set<string>())
-  /**
-   * The first check runs where you left off: the chapter you finished last
-   * time is offered too — even if you read it before recaps existed.
-   */
-  const firstCheck = useRef(true)
+  const findStored = useCallback(
+    (list: typeof recaps, c: Chapter) =>
+      list.find((r) => r.id === recapId(book.id, c)) ?? (kindOf(c) === 'chapter' ? list.find((r) => r.start === c.start && kindOf(r) === 'chapter') : undefined),
+    [book.id],
+  )
 
+  // Opening a book, where you left off: the chapter you finished last time is
+  // offered once — even if you read it before recaps existed.
+  const openChecked = useRef(false)
   useEffect(() => {
-    if (!recapsOn || !chapters.length || !recapsQ || writer) return
-    const atOpen = firstCheck.current
-    firstCheck.current = false
+    if (openChecked.current || !recapsOn || !chapters.length || !recapsQ) return
+    openChecked.current = true
     const read = readSet.current
-    const ch = lastFinishedChapter(chapters, currentPage, read)
-    // Sections only as you finish them (not "where you left off").
-    const sec = recapPrefs.sections && !atOpen ? lastFinishedChapter(sections, currentPage, read) : null
-    // The more recent of the two; a chapter's end stands for its last section too.
-    const c = sec && (!ch || sec.end > ch.end) ? sec : ch
+    const c = lastFinishedChapter(chapters, currentPage, read)
     if (!c) return
-    const id = recapId(book.id, c)
-    if (recapOffered.current.has(id)) return
-    const isSection = kindOf(c) === 'section'
-    const existing = recapsQ.find((r) => r.id === id) ?? (isSection ? undefined : recapsQ.find((r) => r.start === c.start && kindOf(r) === 'chapter'))
+    const existing = findStored(recapsQ, c)
     if (existing && existing.state !== 'due') return
-    if (!existing) {
-      let fresh = atOpen
-      for (let p = c.start; p <= c.end && !fresh; p++) fresh = sessionRead.current.has(p)
-      if (!fresh || c.end - c.start + 1 < (isSection ? 1 : MIN_RECAP_PAGES) || coverage(c, read) < RECAP_COVERAGE) return
-      if (!isSection) void markRecapDue(book.id, c)
-    }
-    recapOffered.current.add(id)
+    if (!existing && (c.end - c.start + 1 < MIN_RECAP_PAGES || coverage(c, read) < RECAP_COVERAGE)) return
+    if (!existing) void markRecapDue(book.id, c)
+    recapOffered.current.add(recapId(book.id, c))
     setRecapPrompt({ chapter: c, waiting: !!existing })
-  }, [recapsOn, recapPrefs.sections, chapters, sections, recapsQ, currentPage, readN, writer, book.id])
+  }, [recapsOn, chapters, recapsQ]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // While reading: a chapter or section is finished the moment its end — the
+  // line where the next heading begins — passes the middle of the screen,
+  // reading forwards. Its recap appears right there, at its last line.
+  const recapUnits = useMemo(() => (recapPrefs.sections ? [...chapters, ...sections] : chapters), [chapters, sections, recapPrefs.sections])
+  const recapLive = useRef({ units: recapUnits, recaps, on: false })
+  recapLive.current = { units: recapUnits, recaps, on: recapsOn && !!recapsQ }
+  /** When (and where) you first read inside each chapter/section this visit. */
+  const recapEntered = useRef(new Map<string, { t: number; pos: number }>())
+  const lastReadingPos = useRef<number | null>(null)
+
+  /** Seconds the text between two book positions takes to read (~1,500 characters a minute). */
+  const readingSeconds = useCallback(
+    (from: number, to: number) => {
+      let chars = 0
+      for (let p = Math.floor(from); p < to; p++) {
+        const share = Math.min(to, p + 1) - Math.max(from, p)
+        if (share > 0) chars += (text.peekIndex(p)?.norm.length ?? 1200) * share
+      }
+      return (chars / 1500) * 60
+    },
+    [text],
+  )
+
+  recapCheck.current = () => {
+    const el = scroller.current
+    const { units, recaps: stored, on } = recapLive.current
+    if (!el || !on || writerOpen.current || !units.length) return
+    const L = layoutRef.current
+    // The reading line: the middle of the screen (or the very end, scrolled to the bottom).
+    const y = el.scrollTop + el.clientHeight * 0.5
+    const p = pageAt(y)
+    const pos = el.scrollTop + el.clientHeight >= el.scrollHeight - 4 ? L.tops.length : p + Math.min(1, Math.max(0, (y - L.tops[p]) / L.heights[p]))
+    const prev = lastReadingPos.current
+    lastReadingPos.current = pos
+    const now = Date.now()
+    for (const u of units) {
+      const id = recapId(book.id, u)
+      if (pos >= (u.from ?? u.start) && pos < (u.to ?? u.end + 1) && !recapEntered.current.has(id)) recapEntered.current.set(id, { t: now, pos })
+    }
+    // Only reading forwards: not scrolling back, not a jump (go-to-page, contents, links).
+    if (prev == null || pos <= prev || pos - prev > 1.25) return
+    const crossed = units.filter((u) => prev < (u.to ?? u.end + 1) && (u.to ?? u.end + 1) <= pos)
+    if (!crossed.length) return
+    // A chapter's end stands for its last section's too: try it first, then sections.
+    const order = [...crossed.filter((u) => kindOf(u) === 'chapter'), ...crossed.filter((u) => kindOf(u) === 'section').sort((a, b) => (b.to ?? 0) - (a.to ?? 0))]
+    for (const c of order) {
+      const id = recapId(book.id, c)
+      const entered = recapEntered.current.get(id)
+      if (recapOffered.current.has(id) || !entered) continue
+      // Read, not skimmed: time spent inside it at least a quarter of what the text takes to read…
+      const end = c.to ?? c.end + 1
+      if ((now - entered.t) / 1000 < Math.min(60, Math.max(2, readingSeconds(entered.pos, end) * 0.25))) continue
+      // …and over longer stretches, most of those pages actually read.
+      const first = Math.floor(entered.pos)
+      const before = c.end - 1
+      if (before - first + 1 >= 3 && coverage({ start: first, end: before }, readSet.current) < 0.6) continue
+      const isSection = kindOf(c) === 'section'
+      const existing = findStored(stored, c)
+      if (existing && existing.state !== 'due') continue
+      if (!isSection && !existing && c.end - c.start + 1 < MIN_RECAP_PAGES) continue
+      if (!isSection && !existing) void markRecapDue(book.id, c)
+      recapOffered.current.add(id)
+      setRecapPrompt({ chapter: c, waiting: !!existing })
+      return
+    }
+  }
+  // Start watching where you are as soon as the chapters are known.
+  useEffect(() => {
+    recapCheck.current?.()
+  }, [recapUnits, recapsQ])
 
   const openRecap = useCallback((c: Chapter, initial?: number | 'summary') => {
     setRecapPrompt(null)
