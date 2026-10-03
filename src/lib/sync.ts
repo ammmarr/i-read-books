@@ -25,9 +25,11 @@ interface State {
   error: string | null
   /** Sync works, but the database is older than the app (some fields aren't saved). */
   warning: string | null
+  /** False while the cloud has no recaps table yet: recaps then stay on the device they were written on. */
+  recapsCloud: boolean
 }
 
-let state: State = { status: supabase ? 'signed-out' : 'off', lastSyncedAt: null, error: null, warning: null }
+let state: State = { status: supabase ? 'signed-out' : 'off', lastSyncedAt: null, error: null, warning: null, recapsCloud: true }
 const listeners = new Set<() => void>()
 function set(patch: Partial<State>) {
   state = { ...state, ...patch }
@@ -160,6 +162,7 @@ function noteTable(table: string, missing: boolean) {
   if (missing === missingTables.has(table)) return
   if (missing) missingTables.add(table)
   else missingTables.delete(table)
+  if (table === 'irb_recaps') set({ recapsCloud: !missing })
   refreshWarning()
 }
 

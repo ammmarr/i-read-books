@@ -3,7 +3,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { Copy, Eye, EyeOff, NotebookPen, Pencil, Trash2 } from 'lucide-react'
 import { db, type Book, type Highlight, type Recap, type RecapQuestion } from '../../db/db'
-import { groupRecaps, kindOf, pageRange, questionTitle, RECAP_QUESTIONS, recapsMarkdown, setBookRecaps, setRecapsEnabled, unitOf, useRecapPrefs, type Chapter } from '../../lib/recaps'
+import {
+  groupRecaps, hasAnswers, isWritten, kindOf, pageRange, questionTitle, RECAP_QUESTIONS, recapsMarkdown, setBookRecaps, setRecapsEnabled, unitOf, useRecapPrefs, type Chapter,
+} from '../../lib/recaps'
+import { useSyncState } from '../../lib/sync'
+import { useAuth } from '../../lib/supabase'
 import { relativeTime } from '../../lib/format'
 import { Button, IconButton } from '../ui/Button'
 import { useToast } from '../ui/Toast'
@@ -21,11 +25,15 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
   const { toast } = useToast()
   const recaps = useLiveQuery(() => db.recaps.where('bookId').equals(book.id).toArray(), [book.id]) ?? NO_RECAPS
   const prefs = useRecapPrefs()
+  const sync = useSyncState()
+  const { session } = useAuth()
   const [test, setTest] = useState(false)
   const [writer, setWriter] = useState<{ chapter: Chapter; initial?: number | 'summary' } | null>(null)
 
-  const done = recaps.filter((r) => r.state === 'done').sort((a, b) => a.start - b.start)
-  const due = recaps.filter((r) => r.state === 'due').sort((a, b) => a.start - b.start)
+  // Everything with answers — finished, or started and not finished yet — shows
+  // in full; chapters finished but not recapped yet wait above.
+  const done = recaps.filter(isWritten).sort((a, b) => a.start - b.start)
+  const due = recaps.filter((r) => r.state === 'due' && !hasAnswers(r)).sort((a, b) => a.start - b.start)
   const offHere = prefs.offBooks.includes(book.id)
 
   const copy = async () => {
@@ -41,9 +49,12 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
   return (
     <section className="mt-10">
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <h2 className="mr-auto text-heading-md text-ink">
-          Recaps <span className="text-body-md tabular text-faint">{done.length}</span>
-        </h2>
+        <div className="mr-auto">
+          <h2 className="text-heading-md text-ink">
+            Questions &amp; answers <span className="text-body-md tabular text-faint">{done.length}</span>
+          </h2>
+          <p className="text-body-sm text-mute">Your recaps after each chapter{prefs.sections ? ' and section' : ''}.</p>
+        </div>
         {done.length > 0 && (
           <>
             <Button variant={test ? 'default' : 'outline'} size="sm" onClick={() => setTest((t) => !t)} aria-pressed={test}>
@@ -63,6 +74,13 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
           </motion.p>
         )}
       </AnimatePresence>
+
+      {session && !sync.recapsCloud && (
+        <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-body-sm text-body">
+          Showing recaps written on this device. Ones from your other devices can’t arrive until the cloud database gets one update — run the latest{' '}
+          <code className="rounded-[4px] bg-hairline-soft px-1">supabase/schema.sql</code>. Everything written here is kept and syncs after that.
+        </p>
+      )}
 
       {(!prefs.enabled || offHere) && (
         <p className="mb-3 rounded-md bg-hairline-soft px-3 py-2 text-body-sm text-body">
@@ -120,7 +138,7 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
                       key={g.chapter.id}
                       recap={g.chapter}
                       test={test}
-                      onEdit={() => setWriter({ chapter: asChapter(g.chapter!), initial: 0 })}
+                      onEdit={() => setWriter({ chapter: asChapter(g.chapter!), initial: g.chapter!.state === 'due' ? undefined : 0 })}
                       onOpen={() => setWriter({ chapter: asChapter(g.chapter!), initial: 'summary' })}
                       onDelete={() => remove(g.chapter!)}
                     />
@@ -135,7 +153,7 @@ export function RecapSection({ book, onJumpToHighlight }: { book: Book; onJumpTo
                         key={r.id}
                         recap={r}
                         test={test}
-                        onEdit={() => setWriter({ chapter: asChapter(r), initial: 0 })}
+                        onEdit={() => setWriter({ chapter: asChapter(r), initial: r.state === 'due' ? undefined : 0 })}
                         onOpen={() => setWriter({ chapter: asChapter(r), initial: 'summary' })}
                         onDelete={() => remove(r)}
                       />
@@ -158,6 +176,7 @@ function RecapCard({ recap: r, test, onEdit, onOpen, onDelete }: { recap: Recap;
   useEffect(() => setShown(new Set()), [test])
   const reveal = (k: RecapQuestion) => setShown((s) => new Set([...s, k]))
   const section = kindOf(r) === 'section'
+  const draft = r.state === 'due'
   return (
     <motion.li
       layout
@@ -169,14 +188,23 @@ function RecapCard({ recap: r, test, onEdit, onOpen, onDelete }: { recap: Recap;
       <div className="flex items-start gap-2">
         <button onClick={onOpen} className="min-w-0 flex-1 text-left">
           {section && <div className="text-mono-eyebrow text-faint">Section</div>}
-          <h3 className="text-label-sm text-ink hover:underline">{r.chapter}</h3>
+          <h3 className="text-label-sm text-ink hover:underline">
+            {r.chapter}
+            {draft && <span className="ml-2 inline-block rounded-full bg-warning/15 px-2 py-px align-middle text-[11px] font-medium text-warning">Not finished</span>}
+          </h3>
           <p className="mt-0.5 text-body-sm text-faint">
             {[pageRange({ title: r.chapter, start: r.start, end: r.end }), relativeTime(r.updatedAt)].filter(Boolean).join(' · ')}
           </p>
         </button>
-        <IconButton label="Edit recap" size="icon-sm" onClick={onEdit}>
-          <Pencil className="size-3.5" />
-        </IconButton>
+        {draft ? (
+          <Button size="sm" variant="outline" onClick={onEdit}>
+            Continue
+          </Button>
+        ) : (
+          <IconButton label="Edit recap" size="icon-sm" onClick={onEdit}>
+            <Pencil className="size-3.5" />
+          </IconButton>
+        )}
         <IconButton label="Delete recap" size="icon-sm" className="hover:bg-error/10 hover:text-error" onClick={onDelete}>
           <Trash2 className="size-3.5" />
         </IconButton>
@@ -187,7 +215,7 @@ function RecapCard({ recap: r, test, onEdit, onOpen, onDelete }: { recap: Recap;
           const hidden = test && !!a && !shown.has(q.key)
           return (
             <div key={q.key}>
-              <dt className="text-body-sm font-medium text-mute">{test ? questionTitle(q, kindOf(r)) : q.label}</dt>
+              <dt className="text-body-sm font-medium text-mute">{questionTitle(q, kindOf(r))}</dt>
               <dd className={`relative mt-1 ${hidden ? 'min-h-11' : ''}`}>
                 {a ? (
                   <p
@@ -197,7 +225,7 @@ function RecapCard({ recap: r, test, onEdit, onOpen, onDelete }: { recap: Recap;
                     {a}
                   </p>
                 ) : (
-                  <p className="text-body-md text-faint">—</p>
+                  <p className="text-body-md text-faint">{draft ? 'Not answered yet' : '—'}</p>
                 )}
                 {hidden && (
                   <button onClick={() => reveal(q.key)} className="absolute inset-0 flex items-center justify-center">

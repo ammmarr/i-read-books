@@ -271,12 +271,14 @@ export const kindFromId = (id: string): RecapKind => (id.split(':').length === 3
 
 export async function findRecap(bookId: string, c: Pick<Chapter, 'start' | 'title' | 'kind'>) {
   const byId = await db.recaps.get(recapId(bookId, c))
-  if (byId || kindOf(c) === 'section') return byId
-  // Chapters written before ids were derived from the chapter.
+  if (byId) return byId
+  // Recaps whose id was made differently (chapters from before ids were
+  // derived): same place, same kind — and for sections, the same title.
+  const kind = kindOf(c)
   return db.recaps
     .where('[bookId+start]')
     .equals([bookId, c.start])
-    .filter((r) => kindOf(r) === 'chapter')
+    .filter((r) => kindOf(r) === kind && (kind === 'chapter' || r.chapter === c.title))
     .first()
 }
 
@@ -312,13 +314,16 @@ export function groupRecaps(recaps: Recap[]) {
   return groups.sort((a, b) => a.start - b.start)
 }
 
+/** Something written in it: finished, or started and not finished yet. */
+export const isWritten = (r: Recap) => r.state === 'done' || (r.state === 'due' && hasAnswers(r))
+
 export function recapsMarkdown(book: { title: string; author?: string }, recaps: Recap[]) {
   const answers = (r: Recap) =>
     RECAP_QUESTIONS.flatMap((q) => (r.answers[q.key]?.trim() ? [`**${q.label}**`, '', r.answers[q.key]!.trim(), ''] : []))
   return [
     `# ${book.title}${book.author ? ` — ${book.author}` : ''} · recaps`,
     '',
-    ...groupRecaps(recaps.filter((r) => r.state === 'done')).flatMap((g) => {
+    ...groupRecaps(recaps.filter(isWritten)).flatMap((g) => {
       const range = g.chapter && pageRange({ title: g.chapter.chapter, start: g.chapter.start, end: g.chapter.end })
       return [
         `## ${g.title}`,
