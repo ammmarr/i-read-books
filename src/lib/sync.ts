@@ -123,6 +123,8 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
         // Keep our cover bitmap unless the remote cover changed.
         cover: l?.cover && (!coverPath || coverPath === l.coverPath) ? l.cover : undefined,
         enriched: l?.enriched,
+        positionBase: l?.positionBase,
+        otherPosition: l?.otherPosition,
       }
     }
     case 'highlights':
@@ -212,9 +214,20 @@ async function pull(userId: string) {
           // whatever else changed on either side.
           const remotePosAt = t === 'books' ? (row.position_at === undefined ? (row.updated_at as number) : ((row.position_at as number | null) ?? 0)) : 0
           const localPosAt = t === 'books' ? (((local as unknown as Book | undefined)?.positionAt) ?? 0) : 0
+          // Another device read on from a spot newer than where this device
+          // started, while this device read on too (from an older spot): keep
+          // ours, but remember theirs so the reader can offer it.
+          const lbk = local as unknown as Book | undefined
+          const diverged =
+            t === 'books' && !!lbk && localPosAt > remotePosAt && remotePosAt > (lbk.positionBase ?? Infinity) && (row.current_page as number) !== lbk.currentPage
+          const other = diverged ? { page: (row.current_page as number) ?? 0, offset: (row.page_offset as number) ?? 0, at: remotePosAt } : undefined
           if (local?.dirty && (local.updatedAt ?? 0) > (row.updated_at as number)) {
             if (t === 'books' && remotePosAt > localPosAt) {
-              await db.table(t).update(id, { currentPage: row.current_page ?? 0, pageOffset: row.page_offset ?? 0, positionAt: remotePosAt })
+              await db.table(t).update(id, {
+                currentPage: row.current_page ?? 0, pageOffset: row.page_offset ?? 0, positionAt: remotePosAt, positionBase: remotePosAt, otherPosition: undefined,
+              })
+            } else if (other && remotePosAt > (lbk!.otherPosition?.at ?? 0)) {
+              await db.table(t).update(id, { otherPosition: other })
             }
             continue
           }
@@ -230,10 +243,15 @@ async function pull(userId: string) {
             next.currentPage = lb0.currentPage
             next.pageOffset = lb0.pageOffset
             next.positionAt = lb0.positionAt
+            if (other && remotePosAt > (lb0.otherPosition?.at ?? 0)) next.otherPosition = other
             if (lb0.currentPage !== row.current_page || lb0.pageOffset !== row.page_offset) {
               next.dirty = 1
               next.updatedAt = Date.now()
             }
+          } else if (t === 'books') {
+            // Took the other device's spot: that's where this one goes on from.
+            next.positionBase = remotePosAt
+            next.otherPosition = undefined
           }
           const lb = local as unknown as Book | undefined
           const rb = next as unknown as Book
@@ -489,9 +507,36 @@ export function syncNow(): Promise<void> {
       } while (again)
     } finally {
       running = null
+      pulled()
     }
   })()
   return running
+}
+
+/** Waiting for "the latest from the cloud is in" (resolved after the next pull, or when a sync can't run). */
+const pullWaiters = new Set<() => void>()
+function pulled() {
+  const ws = [...pullWaiters]
+  pullWaiters.clear()
+  ws.forEach((w) => w())
+}
+
+/**
+ * Bring in the latest from your other devices — resolves as soon as it has
+ * been downloaded (not waiting for uploads), when sync can't run, or after
+ * `timeout` ms at most.
+ */
+export function freshPull(timeout = 6000) {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(t)
+      pullWaiters.delete(done)
+      resolve()
+    }
+    const t = setTimeout(done, timeout)
+    pullWaiters.add(done)
+    void syncNow()
+  })
 }
 
 async function runOnce() {
@@ -513,6 +558,7 @@ async function runOnce() {
   const userId = session.user.id
   try {
     await pull(userId)
+    pulled()
     await push(userId)
     if (await uploadFiles(userId)) await push(userId)
     await syncSettings()

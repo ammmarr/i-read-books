@@ -26,7 +26,7 @@ import { SearchPanel } from './SearchPanel'
 import { useReadingSession } from './useReadingSession'
 import { useImporter } from '../components/Importer'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
-import { downloadBookFile, syncNow } from '../lib/sync'
+import { downloadBookFile, freshPull, syncNow } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
 import { isNative, keepScreenOn, setImmersive } from '../lib/native'
 import {
@@ -61,16 +61,16 @@ export default function Reader() {
   const [detail, setDetail] = useState<string | null>(null)
   // Before opening, give sync a moment to bring in where you left off on
   // another device — so the book opens there, not at this device's older spot.
+  // Waits until the latest is actually downloaded (a device that has been
+  // asleep first renews its sign-in, which takes a moment), up to 6 s.
   const [fresh, setFresh] = useState(() => !cloudEnabled || !getAuthSession() || !navigator.onLine)
   useEffect(() => {
     if (fresh) return
-    let done = false
-    const finish = () => {
-      if (!done) (done = true), setFresh(true)
+    let alive = true
+    void freshPull(6000).then(() => alive && setFresh(true))
+    return () => {
+      alive = false
     }
-    void syncNow().finally(finish)
-    const t = setTimeout(finish, 1500)
-    return () => clearTimeout(t)
   }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
   const hasPdf = book ? book.pageCount > 0 : undefined
 
@@ -164,11 +164,11 @@ export default function Reader() {
         }
       />
     )
-  if (!book || !doc || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} />
+  if (!book || !doc || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} checking={!!book && !!doc && !fresh} />
   return <ReaderView key={book.id} book={book} doc={doc} />
 }
 
-function ReaderLoading({ book, onBack, progress }: { book?: Book; onBack: () => void; progress?: number | null }) {
+function ReaderLoading({ book, onBack, progress, checking }: { book?: Book; onBack: () => void; progress?: number | null; checking?: boolean }) {
   return (
     <div className="grid h-dvh place-items-center bg-canvas">
       <div className="absolute left-3 top-[calc(var(--safe-area-inset-top,env(safe-area-inset-top))+10px)]">
@@ -188,7 +188,11 @@ function ReaderLoading({ book, onBack, progress }: { book?: Book; onBack: () => 
           </motion.div>
         )}
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="mt-6 text-body-md text-mute">
-          {progress != null ? `Downloading from your library… ${Math.round(progress * 100)}%` : `Opening${book ? ` ${book.title}` : ''}…`}
+          {progress != null
+            ? `Downloading from your library… ${Math.round(progress * 100)}%`
+            : checking
+              ? 'Checking where you left off on your other devices…'
+              : `Opening${book ? ` ${book.title}` : ''}…`}
         </motion.p>
         {progress != null && (
           <div className="mt-3 h-1 w-40 overflow-hidden rounded-full bg-hairline">
@@ -273,8 +277,10 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     readOutline(doc).then(setOutline)
   }, [doc])
 
-  // Opening a book makes it "currently reading".
+  // Opening a book makes it "currently reading" — and this spot is where
+  // this device's reading now grows from (see sync: diverged positions).
   useEffect(() => {
+    db.books.update(book.id, { positionBase: book.positionAt ?? 0 })
     db.books.update(book.id, { lastOpenedAt: Date.now() })
     if (book.status === 'queued' || book.status === 'none') setStatus(book.id, 'reading')
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -344,6 +350,8 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   /** You scrolled/jumped since the last save (vs. restore/zoom moving the view). */
   const moved = useRef(false)
   const posQuietUntil = useRef(0)
+  /** You've moved (and saved a spot) since opening the book here. */
+  const movedHere = useRef(false)
   /** Timestamp of the position this device last saved or adopted. */
   const myPositionAt = useRef(book.positionAt ?? 0)
   useLayoutEffect(() => {
@@ -499,6 +507,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     const offset = (el.scrollTop + 16 - L.tops[cp]) / L.heights[cp]
     const at = Date.now()
     myPositionAt.current = at
+    movedHere.current = true
     // Where you are, not how far you've read — progress comes from pages read.
     return db.books.update(book.id, { currentPage: cp, pageOffset: offset, positionAt: at, lastOpenedAt: at })
   }, [book.id, pageAt])
@@ -549,15 +558,29 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     return () => document.removeEventListener('visibilitychange', onHide)
   }, [persist])
 
-  // Another device moved ahead while this book is open: offer to jump there
-  // rather than yanking the page away mid-sentence.
+  // Another device moved ahead while this book is open. If you haven't moved
+  // here yet, go there; once you're reading, offer it instead of yanking the
+  // page away mid-sentence.
   const [elsewhere, setElsewhere] = useState<{ page: number; offset: number } | null>(null)
   useEffect(() => {
     const at = book.positionAt ?? 0
     if (at <= myPositionAt.current) return
     myPositionAt.current = at
-    if (Math.abs(book.currentPage - currentPageRef.current) >= 1) setElsewhere({ page: book.currentPage, offset: book.pageOffset })
+    if (Math.abs(book.currentPage - currentPageRef.current) < 1) return
+    if (!movedHere.current) {
+      scrollToPage(book.currentPage, { frac: book.pageOffset })
+      toast({ id: 'elsewhere', message: `Page ${book.currentPage + 1}`, description: 'Where you left off on your other device.', duration: 3500 })
+    } else setElsewhere({ page: book.currentPage, offset: book.pageOffset })
   }, [book.positionAt]) // eslint-disable-line react-hooks/exhaustive-deps
+  // You read on here from an older spot while your other device had got
+  // further: keep yours, and offer theirs.
+  useEffect(() => {
+    const o = book.otherPosition
+    if (o && Math.abs(o.page - currentPageRef.current) >= 1) setElsewhere({ page: o.page, offset: o.offset })
+  }, [book.otherPosition?.at]) // eslint-disable-line react-hooks/exhaustive-deps
+  const dropOther = useCallback(() => {
+    if (book.otherPosition) void db.books.update(book.id, { otherPosition: undefined })
+  }, [book.id, book.otherPosition])
 
   useEffect(() => () => {
     clearTimeout(saveTimer.current)
@@ -1553,6 +1576,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
               onClick={() => {
                 const e = elsewhere
                 setElsewhere(null)
+                dropOther()
                 scrollToPage(e.page, { frac: e.offset })
               }}
               className="flex h-10 items-center gap-2 rounded-full px-3 text-label-sm text-ink hover:bg-hairline-soft"
@@ -1561,7 +1585,13 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
               Continue from page {elsewhere.page + 1}
               <span className="font-normal text-mute">· read on another device</span>
             </button>
-            <button onClick={() => setElsewhere(null)} aria-label="Stay here" className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
+            <button
+              onClick={() => {
+                setElsewhere(null)
+                dropOther()
+              }}
+              aria-label="Stay here"
+              className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
               <XIcon className="size-3.5" />
             </button>
           </motion.div>

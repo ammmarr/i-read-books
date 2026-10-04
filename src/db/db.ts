@@ -41,6 +41,17 @@ export interface Book extends Synced {
    * independently of other edits to the book.
    */
   positionAt?: number
+  /**
+   * Local only: the `positionAt` this device's current spot grew from — set
+   * when the book opens (where it restored to) or a newer spot is adopted.
+   */
+  positionBase?: number
+  /**
+   * Local only: a spot from another device that's newer than where this
+   * device started, but which this device moved past by reading on (from an
+   * older spot). Offered in the reader as "Continue from page N".
+   */
+  otherPosition?: { page: number; offset: number; at: number }
   /** Furthest page (0-based) actually read (max of readPages). */
   furthestPage: number
   /** Pages actually read (dwelled on), as compact ranges "0-12,15". Progress comes from this. */
@@ -214,7 +225,7 @@ export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'rec
 export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps']
 
 /** Fields that never leave this device, so changing them alone isn't a sync-worthy edit. */
-const LOCAL_ONLY = new Set(['cover', 'dirty', 'uploadError', 'enriched'])
+const LOCAL_ONLY = new Set(['cover', 'dirty', 'uploadError', 'enriched', 'positionBase', 'otherPosition'])
 
 const syncTransactions = new WeakSet<object>()
 export function markSyncTransaction() {
