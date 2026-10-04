@@ -26,7 +26,7 @@ import { SearchPanel } from './SearchPanel'
 import { useReadingSession } from './useReadingSession'
 import { useImporter } from '../components/Importer'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
-import { downloadBookFile, freshPull, syncNow } from '../lib/sync'
+import { downloadBookFile, freshPull, noteOwnPosition, syncNow } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
 import { isNative, keepScreenOn, setImmersive } from '../lib/native'
 import {
@@ -508,6 +508,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     const at = Date.now()
     myPositionAt.current = at
     movedHere.current = true
+    noteOwnPosition(at)
     // Where you are, not how far you've read — progress comes from pages read.
     return db.books.update(book.id, { currentPage: cp, pageOffset: offset, positionAt: at, lastOpenedAt: at })
   }, [book.id, pageAt])
@@ -576,7 +577,8 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   // further: keep yours, and offer theirs.
   useEffect(() => {
     const o = book.otherPosition
-    if (o && Math.abs(o.page - currentPageRef.current) >= 1) setElsewhere({ page: o.page, offset: o.offset })
+    // Only ever forwards: a spot behind where you are isn't worth a detour.
+    if (o && o.page > currentPageRef.current) setElsewhere({ page: o.page, offset: o.offset })
   }, [book.otherPosition?.at]) // eslint-disable-line react-hooks/exhaustive-deps
   const dropOther = useCallback(() => {
     if (book.otherPosition) void db.books.update(book.id, { otherPosition: undefined })

@@ -168,6 +168,32 @@ function noteTable(table: string, missing: boolean) {
   refreshWarning()
 }
 
+// ── Reading positions this device saved ──────────────────────────────────
+// Every push comes back on the next pull (the server's copy of our own row).
+// Those echoes are this device's own older spots — never "another device".
+const OWN_KEY = 'irb-own-positions'
+// Read from storage each time: every window/tab of the app on this device
+// shares one list (two windows open on a PC are still "this device").
+function ownPositions(): number[] {
+  try {
+    return JSON.parse(localStorage.getItem(OWN_KEY) || '[]') as number[]
+  } catch {
+    return []
+  }
+}
+/** The reader calls this whenever it saves where you are (positionAt). */
+export function noteOwnPosition(at: number) {
+  let list = ownPositions()
+  list.push(at)
+  if (list.length > 400) list = list.slice(-300)
+  try {
+    localStorage.setItem(OWN_KEY, JSON.stringify(list))
+  } catch {
+    /* ignore */
+  }
+}
+const isOwnPosition = (at: number) => ownPositions().includes(at)
+
 const cursorKey = (userId: string, t: string) => `irb-sync-${userId}-${t}`
 function getCursor(userId: string, t: string) {
   try {
@@ -218,8 +244,15 @@ async function pull(userId: string) {
           // started, while this device read on too (from an older spot): keep
           // ours, but remember theirs so the reader can offer it.
           const lbk = local as unknown as Book | undefined
+          // Only a genuinely other device's spot, and only one further on in the
+          // book — never this device's own echo, never a step back.
           const diverged =
-            t === 'books' && !!lbk && localPosAt > remotePosAt && remotePosAt > (lbk.positionBase ?? Infinity) && (row.current_page as number) !== lbk.currentPage
+            t === 'books' &&
+            !!lbk &&
+            localPosAt > remotePosAt &&
+            remotePosAt > (lbk.positionBase ?? Infinity) &&
+            !isOwnPosition(remotePosAt) &&
+            ((row.current_page as number) ?? 0) > lbk.currentPage
           const other = diverged ? { page: (row.current_page as number) ?? 0, offset: (row.page_offset as number) ?? 0, at: remotePosAt } : undefined
           if (local?.dirty && (local.updatedAt ?? 0) > (row.updated_at as number)) {
             if (t === 'books' && remotePosAt > localPosAt) {
@@ -248,8 +281,9 @@ async function pull(userId: string) {
               next.dirty = 1
               next.updatedAt = Date.now()
             }
-          } else if (t === 'books') {
+          } else if (t === 'books' && !isOwnPosition(remotePosAt)) {
             // Took the other device's spot: that's where this one goes on from.
+            // (This device's own echoes change nothing here.)
             next.positionBase = remotePosAt
             next.otherPosition = undefined
           }
@@ -631,6 +665,18 @@ export async function signOutAndStop() {
 
 /** Wire up triggers once at startup. */
 export function startSync() {
+  // Once: drop "continue from…" offers left behind by mistaking this
+  // device's own echoes for another device.
+  try {
+    if (!localStorage.getItem('irb-other-pos-reset-1')) {
+      localStorage.setItem('irb-other-pos-reset-1', '1')
+      void db.books.toCollection().modify((b: Book) => {
+        delete b.otherPosition
+      })
+    }
+  } catch {
+    /* ignore */
+  }
   if (!supabase) return
   setLocalChangeListener(() => scheduleSync(4000))
   setSettingsChangeListener(() => scheduleSync(2000))
