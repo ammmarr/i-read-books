@@ -1373,6 +1373,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         flashHighlightId={flashId}
         hits={hitsByPage.get(i) ?? NO_PAGE_HITS}
         bookmarked={bmPages.has(i)}
+        night={pageTheme === 'night'}
         onCurrentHitRect={onCurrentHitRect}
         onLink={followLink}
       />,

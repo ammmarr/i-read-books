@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { pdfjs, readLinks, type PDFDocumentProxy, type PdfLink } from '../lib/pdf'
 import type { Highlight, NormRect } from '../db/db'
 import { rangeFor, type DocText } from './textIndex'
+import { pictureLayers } from './pictures'
 
 /** Keep each canvas under ~16 MP — mobile browsers silently fail above that. */
 const MAX_CANVAS_PIXELS = 16_000_000
@@ -27,6 +28,8 @@ interface Props {
   flashHighlightId?: string | null
   hits: PageHit[]
   bookmarked: boolean
+  /** Night page theme: the page is drawn inverted, pictures aren't. */
+  night: boolean
   onCurrentHitRect?: (page: number, rect: NormRect) => void
   onLink?: (link: PdfLink, page: number) => void
 }
@@ -34,7 +37,7 @@ interface Props {
 type TextLayerInstance = InstanceType<typeof pdfjs.TextLayer>
 
 export const PageView = memo(function PageView({
-  doc, text, index, scale, top, left, width, height, highlights, freshHighlightId, flashHighlightId, hits, bookmarked, onCurrentHitRect, onLink,
+  doc, text, index, scale, top, left, width, height, highlights, freshHighlightId, flashHighlightId, hits, bookmarked, night, onCurrentHitRect, onLink,
 }: Props) {
   const host = useRef<HTMLDivElement>(null)
   const pageEl = useRef<HTMLDivElement>(null)
@@ -55,7 +58,10 @@ export const PageView = memo(function PageView({
   }, [doc, index])
 
   // Canvas: render into a fresh canvas and swap it in when done, so zooming
-  // shows the old (stretched) bitmap instead of flashing blank.
+  // shows the old (stretched) bitmap instead of flashing blank. In night mode
+  // the page's pictures go on top un-inverted (see pictures.ts).
+  const nightRef = useRef(night)
+  nightRef.current = night
   useEffect(() => {
     let cancelled = false
     let task: ReturnType<Awaited<ReturnType<PDFDocumentProxy['getPage']>>['render']> | null = null
@@ -71,15 +77,19 @@ export const PageView = memo(function PageView({
           const canvas = document.createElement('canvas')
           canvas.width = Math.floor(viewport.width * output)
           canvas.height = Math.floor(viewport.height * output)
+          canvas.className = 'pdf-canvas'
           canvas.setAttribute('aria-hidden', 'true')
           task = page.render({
             canvas,
             viewport,
             transform: output !== 1 ? [output, 0, 0, output, 0, 0] : undefined,
+            // Where the pictures are — recorded once per page, kept on the page.
+            recordImages: !page.imageCoordinates,
           })
           await task.promise
           if (cancelled || !host.current) return
           host.current.replaceChildren(canvas)
+          if (nightRef.current) addPictures(host.current, doc, index, canvas)
           setRendered(true)
         } catch (e) {
           if ((e as Error)?.name !== 'RenderingCancelledException') console.warn('page render failed', index, e)
@@ -94,6 +104,13 @@ export const PageView = memo(function PageView({
       task?.cancel()
     }
   }, [doc, index, scale])
+
+  // Switched to night with the page already drawn: add its pictures now.
+  useEffect(() => {
+    const el = host.current
+    const canvas = el?.querySelector<HTMLCanvasElement>('canvas.pdf-canvas')
+    if (night && el && canvas) addPictures(el, doc, index, canvas)
+  }, [night, rendered, doc, index])
 
   // Text layer: created once per page, then just re-laid-out on zoom.
   useEffect(() => {
@@ -263,6 +280,18 @@ export const PageView = memo(function PageView({
     </div>
   )
 })
+
+/** Lays the page's pictures over its bitmap, un-inverted for night mode — once per bitmap. */
+function addPictures(host: HTMLElement, doc: PDFDocumentProxy, index: number, canvas: HTMLCanvasElement) {
+  if (canvas.dataset.pictures) return
+  canvas.dataset.pictures = '1'
+  doc
+    .getPage(index + 1)
+    .then((page) => {
+      if (canvas.parentNode === host) host.append(...pictureLayers(canvas, page.imageCoordinates))
+    })
+    .catch(() => {})
+}
 
 function FlashRing({ rects }: { rects: NormRect[] }) {
   const xs = rects.map((r) => r[0]), ys = rects.map((r) => r[1])
