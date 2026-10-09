@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
@@ -49,9 +49,23 @@ const NO_BOOKMARKS: Bookmark[] = []
 const NO_PAGE_HITS: PageHit[] = []
 const NO_RECAPS: Recap[] = []
 
+/** Open the reader at a spot (a note on the book's page) without moving where you left off. */
+export interface OpenAt {
+  page: number
+  /** How far down the page (0–1). */
+  top: number
+  highlightId?: string
+}
+
 export default function Reader() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [openAt] = useState(() => (location.state as { openAt?: OpenAt } | null)?.openAt)
+  useEffect(() => {
+    // Used once: reloading the reader goes back to where you left off.
+    if (location.state) navigate(location.pathname, { replace: true, state: null })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   const { attach } = useImporter()
   const book = useLiveQuery(() => (id ? db.books.get(id) : undefined), [id])
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
@@ -165,7 +179,7 @@ export default function Reader() {
       />
     )
   if (!book || !doc || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} checking={!!book && !!doc && !fresh} />
-  return <ReaderView key={book.id} book={book} doc={doc} />
+  return <ReaderView key={book.id} book={book} doc={doc} openAt={openAt} />
 }
 
 function ReaderLoading({ book, onBack, progress, checking }: { book?: Book; onBack: () => void; progress?: number | null; checking?: boolean }) {
@@ -246,7 +260,7 @@ function ReaderMessage({
   )
 }
 
-function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
+function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; openAt?: OpenAt }) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const settings = useSettings()
@@ -261,8 +275,11 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
 
   const saved = useMemo(() => loadBookView(book.id), [book.id])
   const [view, setView] = useState<{ mode: ZoomMode; zoom: number }>(saved ?? { mode: 'auto', zoom: PT_TO_PX })
-  const [currentPage, setCurrentPage] = useState(book.currentPage)
-  const [range, setRange] = useState<[number, number]>([Math.max(0, book.currentPage - 1), book.currentPage + 2])
+  const [currentPage, setCurrentPage] = useState(openAt?.page ?? book.currentPage)
+  const [range, setRange] = useState<[number, number]>(() => {
+    const p = openAt?.page ?? book.currentPage
+    return [Math.max(0, p - 1), p + 2]
+  })
   const [chrome, setChrome] = useState(true)
   const [sidebar, setSidebar] = useState<{ open: boolean; tab: SidebarTab }>({ open: false, tab: 'contents' })
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -354,17 +371,40 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const movedHere = useRef(false)
   /** Timestamp of the position this device last saved or adopted. */
   const myPositionAt = useRef(book.positionAt ?? 0)
+
+  // Jumping elsewhere — to a note, a link, a search hit, the contents, a
+  // bookmark or a page number — leaves "Back to page N", like a finger holding
+  // your place (see holdPlace). It goes once you read on from where you landed.
+  const [place, setPlace] = useState<{ page: number; frac: number } | null>(null)
+  const placeRef = useRef(place)
+  /** Where the last jump landed, and whether it's only a look (a note, a link, a search hit). */
+  const landed = useRef<{ page: number; peek: boolean } | null>(null)
+
   useLayoutEffect(() => {
     const el = scroller.current
     // Wait for the measured viewport so the restored offset matches the real layout.
     if (!el || restored.current || vp.h < 10 || Math.abs(el.clientWidth - vp.w) > 1) return
     restored.current = true
-    const i = Math.min(book.currentPage, layout.tops.length - 1)
+    const last = layout.tops.length - 1
     // Putting you back where you were isn't you moving — don't re-save it.
     posQuietUntil.current = performance.now() + 800
-    el.scrollTop = layout.tops[i] + book.pageOffset * layout.heights[i] - 16
     el.scrollLeft = (layout.contentW - vp.w) / 2
-  }, [layout, vp, book.currentPage, book.pageOffset])
+    if (openAt) {
+      // Opened at a note from the book's page: show it, and keep your place.
+      const i = Math.min(openAt.page, last)
+      el.scrollTop = layout.tops[i] + openAt.top * layout.heights[i] - el.clientHeight * 0.35
+      movedHere.current = true
+      if (i !== book.currentPage) {
+        const p = { page: Math.min(book.currentPage, last), frac: book.pageOffset }
+        placeRef.current = p
+        setPlace(p)
+        landed.current = { page: i, peek: true }
+      }
+      return
+    }
+    const i = Math.min(book.currentPage, last)
+    el.scrollTop = layout.tops[i] + book.pageOffset * layout.heights[i] - 16
+  }, [layout, vp, book.currentPage, book.pageOffset, openAt])
 
   // ── Zoom with a fixed anchor point ────────────────────────────────────
   const anchor = useRef<{ idx: number; frac: number; ax: number; ay: number; fx: number } | null>(null)
@@ -504,6 +544,15 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     moved.current = false
     const L = layoutRef.current
     const cp = pageAt(el.scrollTop + el.clientHeight * 0.4)
+    const l = landed.current
+    if (l) {
+      if (cp >= l.page + 2) {
+        // Read on from where a jump took you: that's where you are now.
+        placeRef.current = null
+        landed.current = null
+        setPlace(null)
+      } else if (l.peek) return // Just looking: your spot stays where you left off.
+    }
     const offset = (el.scrollTop + 16 - L.tops[cp]) / L.heights[cp]
     const at = Date.now()
     myPositionAt.current = at
@@ -512,6 +561,32 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     // Where you are, not how far you've read — progress comes from pages read.
     return db.books.update(book.id, { currentPage: cp, pageOffset: offset, positionAt: at, lastOpenedAt: at })
   }, [book.id, pageAt])
+
+  /** Before a jump to page `to`: remember where you are (once — the first spot is "where you left off"). */
+  const holdPlace = useCallback(
+    (to: number, peek: boolean) => {
+      const el = scroller.current
+      if (!el) return
+      movedHere.current = true
+      clearTimeout(saveTimer.current)
+      void persist()
+      if (!placeRef.current) {
+        const L = layoutRef.current
+        const here = pageAt(el.scrollTop + 16)
+        if (here === to) return
+        const p = { page: here, frac: (el.scrollTop + 16 - L.tops[here]) / L.heights[here] }
+        placeRef.current = p
+        setPlace(p)
+      }
+      landed.current = { page: to, peek }
+    },
+    [pageAt, persist],
+  )
+  const releasePlace = useCallback(() => {
+    placeRef.current = null
+    landed.current = null
+    setPlace(null)
+  }, [])
 
   /** Chapter/section recaps watch the reading position (set up further down). */
   const recapCheck = useRef<() => void>(undefined)
@@ -965,9 +1040,12 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
       const el = scroller.current
       const L = layoutRef.current
       // Only jump if the page isn't already comfortably in view.
-      if (el && (L.tops[m.page] > el.scrollTop + el.clientHeight * 0.7 || L.tops[m.page] + L.heights[m.page] < el.scrollTop + 60)) scrollToPage(m.page)
+      if (el && (L.tops[m.page] > el.scrollTop + el.clientHeight * 0.7 || L.tops[m.page] + L.heights[m.page] < el.scrollTop + 60)) {
+        holdPlace(m.page, true)
+        scrollToPage(m.page)
+      }
     },
-    [matches, scrollToPage],
+    [matches, scrollToPage, holdPlace],
   )
 
   const hitsByPage = useMemo(() => {
@@ -1007,6 +1085,17 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   const pointerDown = useRef(false)
   const [freshId, setFreshId] = useState<string | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
+  // Opened at a note: make it easy to spot.
+  useEffect(() => {
+    const id = openAt?.highlightId
+    if (!id) return
+    const show = setTimeout(() => setFlashId(id), 350)
+    const hide = setTimeout(() => setFlashId(null), 2200)
+    return () => {
+      clearTimeout(show)
+      clearTimeout(hide)
+    }
+  }, [openAt])
   const [active, setActive] = useState<{ id: string; rect: DOMRect; focusNote?: boolean } | null>(null)
   const activeHighlight = active ? highlights.find((h) => h.id === active.id) ?? null : null
 
@@ -1169,10 +1258,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
   }, [active])
 
   // ── PDF links ─────────────────────────────────────────────────────────
-  // Following an internal link leaves a "Back to page N" pill, like a book's
-  // finger holding your place.
-  const [linkReturn, setLinkReturn] = useState<{ page: number; frac: number } | null>(null)
-  const returnTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  // Following an internal link holds your place (see holdPlace).
   const followLink = useCallback(
     async (link: PdfLink) => {
       const el = scroller.current
@@ -1188,27 +1274,32 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         default: target = link.dest != null ? await resolveDest(doc, link.dest) : null
       }
       if (!target) return
-      const here = pageAt(el.scrollTop + 16)
-      setLinkReturn({ page: here, frac: (el.scrollTop + 16 - L.tops[here]) / L.heights[here] })
-      clearTimeout(returnTimer.current)
-      returnTimer.current = setTimeout(() => setLinkReturn(null), 20000)
       const p = Math.max(0, Math.min(L.tops.length - 1, target.page))
+      holdPlace(p, true)
       scrollState.current.quietUntil = performance.now() + 400
       el.scrollTo({ top: L.tops[p] + (target.top ?? 0) * L.heights[p] - (target.top ? 24 : 16), behavior: 'instant' })
       vibrate(6)
     },
-    [doc, pageAt],
+    [doc, pageAt, holdPlace],
   )
-  const goBackFromLink = useCallback(() => {
-    const r = linkReturn
+  const goBack = useCallback(() => {
+    const r = placeRef.current
     if (!r) return
-    setLinkReturn(null)
+    releasePlace()
     scrollToPage(r.page, { frac: r.frac })
-  }, [linkReturn, scrollToPage])
+  }, [releasePlace, scrollToPage])
+  /** Dismissing "Back to page N": here is where you are now. */
+  const stayHere = useCallback(() => {
+    releasePlace()
+    moved.current = true
+    clearTimeout(saveTimer.current)
+    void persist()
+  }, [releasePlace, persist])
 
   const jumpToHighlight = useCallback(
     (h: Highlight) => {
       setSidebar((s) => ({ ...s, open: false }))
+      holdPlace(h.page, true)
       const r = h.rects[0]
       const el = scroller.current
       if (el) {
@@ -1220,7 +1311,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
       setTimeout(() => setFlashId(h.id), 120)
       setTimeout(() => setFlashId(null), 1900)
     },
-    [],
+    [holdPlace],
   )
 
   const copyAllHighlights = useCallback(async () => {
@@ -1303,10 +1394,12 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
           break
         case 'Home':
           e.preventDefault()
+          holdPlace(0, false)
           scrollToPage(0)
           break
         case 'End':
           e.preventDefault()
+          holdPlace(book.pageCount - 1, false)
           scrollToPage(book.pageCount - 1)
           break
         case 'b':
@@ -1342,7 +1435,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [stepZoom, zoomTo, scale, currentPage, scrollToPage, toggleBookmark, selAnchor, createHighlight, searchOpen, closeSearch, book.pageCount, toggleFitWidth, recapHere])
+  }, [stepZoom, zoomTo, scale, currentPage, scrollToPage, toggleBookmark, selAnchor, createHighlight, searchOpen, closeSearch, book.pageCount, toggleFitWidth, recapHere, holdPlace])
 
   // ── Render ────────────────────────────────────────────────────────────
   const pageTheme = settings.pageTheme === 'auto' ? (dark ? 'night' : 'paper') : settings.pageTheme
@@ -1534,12 +1627,22 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
                 count={book.pageCount}
                 chapterFor={chapterFor}
                 bookmarks={bmPages}
-                onScrub={(p) => scrollToPage(p)}
+                onScrub={(p) => {
+                  holdPlace(p, false)
+                  scrollToPage(p)
+                }}
               />
               <IconButton label="Next page (→)" size="icon-sm" onClick={() => scrollToPage(currentPage + 1, { smooth: true })} disabled={currentPage >= book.pageCount - 1}>
                 <ChevronRight className="size-4" />
               </IconButton>
-              <GoToPage page={currentPage} count={book.pageCount} onGo={(p) => scrollToPage(p)} progress={readN / Math.max(1, book.pageCount)} />
+              <GoToPage
+                page={currentPage}
+                count={book.pageCount}
+                onGo={(p) => {
+                  holdPlace(p, false)
+                  scrollToPage(p)
+                }}
+                progress={readN / Math.max(1, book.pageCount)} />
               {!mobile && (
                 <div className="ml-1 flex items-center rounded-full border border-hairline">
                   <IconButton label="Zoom out (Ctrl −)" size="icon-sm" onClick={() => stepZoom(-1)}>
@@ -1564,7 +1667,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
 
       {/* Newer position from another device */}
       <AnimatePresence>
-        {elsewhere && !linkReturn && (
+        {elsewhere && !place && (
           <motion.div
             key="elsewhere"
             initial={{ opacity: 0, y: 16, scale: 0.95 }}
@@ -1601,11 +1704,11 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         )}
       </AnimatePresence>
 
-      {/* Back from an internal link */}
+      {/* Back to where you left off, after a jump */}
       <AnimatePresence>
-        {linkReturn && (
+        {place && (
           <motion.div
-            key="link-return"
+            key="place"
             initial={{ opacity: 0, y: 16, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 10, scale: 0.97 }}
@@ -1614,11 +1717,12 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
               chrome ? 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+80px)]' : 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+20px)]'
             } transition-[bottom] duration-300`}
           >
-            <button onClick={goBackFromLink} className="flex h-10 items-center gap-2 rounded-full px-3 text-label-sm text-ink hover:bg-hairline-soft">
+            <button onClick={goBack} className="flex h-10 items-center gap-2 rounded-full px-3 text-label-sm text-ink hover:bg-hairline-soft">
               <CornerUpLeft className="size-4 text-link" />
-              Back to page {linkReturn.page + 1}
+              Back to page {place.page + 1}
+              <span className="font-normal text-mute">· where you left off</span>
             </button>
-            <button onClick={() => setLinkReturn(null)} aria-label="Dismiss" className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
+            <button onClick={stayHere} aria-label="Stay here" title="Stay here" className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
               <XIcon className="size-3.5" />
             </button>
           </motion.div>
@@ -1628,7 +1732,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
       {/* Chapter finished → recap (gone by itself if it gets written on another device) */}
       <AnimatePresence>
         {recapPrompt &&
-          !(mobile && (elsewhere || linkReturn)) &&
+          !(mobile && (elsewhere || place)) &&
           !['done', 'skipped'].includes(recaps.find((r) => r.id === recapId(book.id, recapPrompt.chapter))?.state ?? '') && (
           <RecapPromptCard
             key={recapId(book.id, recapPrompt.chapter)}
@@ -1702,6 +1806,7 @@ function ReaderView({ book, doc }: { book: Book; doc: PDFDocumentProxy }) {
         bookmarks={bookmarks}
         onJump={(p) => {
           setSidebar((s) => ({ ...s, open: false }))
+          holdPlace(p, false)
           scrollToPage(p)
         }}
         onJumpHighlight={jumpToHighlight}

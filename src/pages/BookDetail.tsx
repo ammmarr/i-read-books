@@ -6,6 +6,7 @@ import { ArrowLeft, BookOpen, Copy, ExternalLink, FilePlus, Pencil, Trash2 } fro
 import { useImporter } from '../components/Importer'
 import { readCount } from '../lib/pages'
 import { db, type Highlight, type HighlightColor } from '../db/db'
+import type { OpenAt } from '../reader/Reader'
 import { bookProgress, renameBook, setPagesRead, setStatus } from '../db/books'
 import { PageContainer } from '../components/AppShell'
 import { BookCover } from '../components/BookCover'
@@ -67,9 +68,11 @@ export default function BookDetail() {
   const p = bookProgress(book)
   const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || a.rects[0][1] - b.rects[0][1])
 
-  const openAt = async (h: Highlight) => {
-    await db.books.update(book.id, { currentPage: h.page, pageOffset: Math.max(0, (h.rects[0]?.[1] ?? 0) - 0.2) })
-    navigate(`/read/${book.id}`)
+  // Opens the reader at the note; where you left off reading stays put
+  // ("Back to page N" there takes you back).
+  const openAt = (h: Highlight) => {
+    const at: OpenAt = { page: h.page, top: h.rects[0]?.[1] ?? 0, highlightId: h.id }
+    navigate(`/read/${book.id}`, { state: { openAt: at } })
   }
 
   const copyAll = async () => {
