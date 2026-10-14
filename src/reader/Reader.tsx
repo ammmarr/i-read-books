@@ -1365,6 +1365,10 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         return
       }
 
+      // Shift with the arrows, Home/End or Page Up/Down extends a text
+      // selection — that's the browser's, not a page turn.
+      if (e.shiftKey && /^(Arrow|Home$|End$|Page)/.test(e.key)) return
+
       const wide = layoutRef.current.contentW > el.clientWidth + 2
       switch (e.key) {
         case 'ArrowRight':
