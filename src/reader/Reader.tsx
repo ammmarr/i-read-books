@@ -1233,6 +1233,30 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     if (e.clientY - r.top < 72 || r.bottom - e.clientY < 96) setChrome(true)
   }
 
+  // The pointer goes away with the bars, so nothing sits on the page while you
+  // read. Moving the mouse brings it back; it goes again after a moment still.
+  // (A class on the scroller rather than state: no re-render per mouse move.)
+  useEffect(() => {
+    const el = scroller.current
+    if (!el || chrome) return
+    el.classList.add('cursor-away')
+    let t: ReturnType<typeof setTimeout> | undefined
+    const onMove = (e: PointerEvent) => {
+      // Scrolling fires mouse moves too, without the mouse moving.
+      if (e.pointerType !== 'mouse' || (!e.movementX && !e.movementY)) return
+      el.classList.remove('cursor-away')
+      clearTimeout(t)
+      const onControl = e.target instanceof Element && e.target.closest('button, a, input, textarea, [role="button"]')
+      if (!onControl) t = setTimeout(() => el.classList.add('cursor-away'), 1500)
+    }
+    window.addEventListener('pointermove', onMove, { passive: true })
+    return () => {
+      clearTimeout(t)
+      window.removeEventListener('pointermove', onMove)
+      el.classList.remove('cursor-away')
+    }
+  }, [chrome])
+
   // Keep the selection toolbar glued to the text while scrolling.
   useEffect(() => {
     const el = scroller.current

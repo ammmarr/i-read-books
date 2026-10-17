@@ -175,6 +175,9 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
+/* Bars hidden while reading: so is the pointer (until the mouse moves). */
+.reader-scroll.cursor-away,
+.reader-scroll.cursor-away * { cursor: none !important; }
 
 .pdf-page {
   --hl-yellow: rgb(253 224 71 / 0.55);
