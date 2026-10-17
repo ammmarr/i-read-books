@@ -11,8 +11,8 @@ import { closePdf, flattenOutline, openPdfBlob, readOutline, resolveDest, type O
 import { loadBookView, saveBookView, useSettings, type ZoomMode } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
 import { useIsMobile, useIsTouch, vibrate } from '../lib/hooks'
-import { formatDuration } from '../lib/format'
-import { IconButton } from '../components/ui/Button'
+import { formatDuration, formatDurationLong } from '../lib/format'
+import { Button, IconButton } from '../components/ui/Button'
 import { useToast } from '../components/ui/Toast'
 import { BookCover } from '../components/BookCover'
 import { Sheet } from '../components/ui/Sheet'
@@ -753,11 +753,20 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   )
 
   // ── Reading session & wake lock ───────────────────────────────────────
-  const { sessionSeconds, idle } = useReadingSession({
+  // About how long a page takes to read (1,500 characters a minute).
+  const pageSeconds = useCallback(
+    (page: number) => {
+      const n = text.peekIndex(page)?.norm.length
+      return n == null ? 90 : Math.max(30, Math.min(600, (n / 1500) * 60))
+    },
+    [text],
+  )
+  const { sessionSeconds, idle, asking, away, stillHere, countAway, dismissAway } = useReadingSession({
     bookId: book.id,
     currentPage,
     enabled: true,
     dwellFor,
+    pageSeconds,
     onPageRead,
     goalSeconds: settings.dailyGoalMinutes * 60,
     onGoalReached: () => {
@@ -766,8 +775,10 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     },
   })
 
+  // Away (no answer to "Still reading?"): let the screen sleep after all.
+  const awayNow = !!away && !away.back
   useEffect(() => {
-    if (!settings.keepAwake) return
+    if (!settings.keepAwake || awayNow) return
     if (isNative) {
       void keepScreenOn(true)
       return () => void keepScreenOn(false)
@@ -787,7 +798,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       document.removeEventListener('visibilitychange', acquire)
       lock?.release().catch(() => {})
     }
-  }, [settings.keepAwake])
+  }, [settings.keepAwake, awayNow])
 
   useEffect(() => {
     const on = () => setFullscreen(!!document.fullscreenElement)
@@ -1553,7 +1564,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
               </div>
               {settings.showSessionTimer && sessionSeconds > 0 && (
                 <div
-                  title={idle ? 'Paused — no activity' : 'Reading time this session'}
+                  title={idle ? 'Paused' : 'Reading time this session'}
                   className={`mr-1 hidden h-7 items-center gap-1.5 rounded-full border border-hairline px-2.5 text-body-sm tabular transition-colors sm:inline-flex ${idle ? 'text-faint' : 'text-body'}`}
                 >
                   <Timer className={`size-3.5 ${idle ? '' : 'text-link'}`} />
@@ -1728,6 +1739,51 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
               className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
               <XIcon className="size-3.5" />
             </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Left open? "Still reading?" — unanswered, the still time stops counting */}
+      <AnimatePresence>
+        {(asking != null || away) && (
+          <motion.div
+            key="still"
+            initial={{ opacity: 0, y: -12, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8, scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+            role="alertdialog"
+            aria-live="assertive"
+            aria-label={away ? 'Reading time paused' : 'Still reading?'}
+            className="absolute left-1/2 top-[calc(var(--safe-area-inset-top,env(safe-area-inset-top))+76px)] z-50 flex w-[min(400px,calc(100vw-32px))] -translate-x-1/2 items-center gap-3 rounded-lg border border-hairline bg-canvas-elevated py-3 pl-4 pr-3 shadow-floating"
+          >
+            <Timer className={`size-4 shrink-0 ${away ? 'text-faint' : 'text-link'}`} />
+            <div className="min-w-0 flex-1">
+              <p className="text-label-sm text-ink">{!away ? 'Still reading?' : away.back ? 'Welcome back' : 'Reading time paused'}</p>
+              <p className="text-body-sm text-mute">
+                {!away
+                  ? `Your reading time pauses in ${asking} s.`
+                  : away.off > 0
+                    ? `${formatDurationLong(away.off)} while you were away ${away.off < 90 ? 'wasn’t' : 'weren’t'} counted.`
+                    : away.back
+                      ? 'Your reading time is running again.'
+                      : 'It runs again when you’re back.'}
+              </p>
+            </div>
+            {!away ? (
+              <Button size="sm" onClick={stillHere}>
+                I’m here
+              </Button>
+            ) : away.off > 0 ? (
+              <Button size="sm" variant="outline" onClick={countAway}>
+                I was reading
+              </Button>
+            ) : null}
+            {away?.back && (
+              <button onClick={dismissAway} aria-label="Dismiss" className="grid size-8 shrink-0 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
+                <XIcon className="size-3.5" />
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
