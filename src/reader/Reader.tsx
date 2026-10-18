@@ -19,6 +19,8 @@ import { Sheet } from '../components/ui/Sheet'
 import { PageView, type PageHit } from './PageView'
 import { DocText, findInPage, normalizeQuery, type Match } from './textIndex'
 import { HighlightPopover, SelectionToolbar, HL_COLORS } from './HighlightTools'
+import { DefinePopover, type DefineTarget } from './DefinePopover'
+import { wordFrom } from '../lib/dictionary'
 import { selectionBox, selectionPieces } from './selection'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { ReaderSettings } from './ReaderSettings'
@@ -1092,7 +1094,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   }, [])
 
   // ── Selection → highlight ─────────────────────────────────────────────
-  const [selAnchor, setSelAnchor] = useState<{ rect: DOMRect; below?: boolean } | null>(null)
+  const [selAnchor, setSelAnchor] = useState<{ rect: DOMRect; below?: boolean; word?: string | null } | null>(null)
   const pointerDown = useRef(false)
   const [freshId, setFreshId] = useState<string | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
@@ -1115,8 +1117,45 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     const sel = window.getSelection()
     if (!el || !sel || sel.isCollapsed || !sel.rangeCount || !el.contains(sel.anchorNode)) return setSelAnchor(null)
     const box = selectionBox()
-    setSelAnchor(box ? { rect: box, below: touch } : null)
+    setSelAnchor(box ? { rect: box, below: touch, word: wordFrom(sel.toString()) } : null)
   }, [touch])
+
+  // ── A word's meaning ──────────────────────────────────────────────────
+  // Hold A and double-click a word (or select it and tap the book icon —
+  // the way on a tablet): its meaning, right there.
+  const [defineAt, setDefineAt] = useState<DefineTarget | null>(null)
+  const aHeld = useRef(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== 'a') return
+      const typing = e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')
+      aHeld.current = e.type === 'keydown' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey
+    }
+    const off = () => (aHeld.current = false)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keyup', onKey)
+    window.addEventListener('blur', off)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keyup', onKey)
+      window.removeEventListener('blur', off)
+    }
+  }, [])
+  const onDoubleClick = () => {
+    if (!aHeld.current) return
+    // The double-click has just selected the word under the mouse.
+    const word = wordFrom(window.getSelection()?.toString() ?? '')
+    const box = selectionBox()
+    if (word && box) setDefineAt({ word, rect: box, below: false })
+  }
+  const closeDefine = useCallback(() => setDefineAt(null), [])
+  // It sits by the word: scrolling the page away closes it.
+  useEffect(() => {
+    if (!defineAt) return
+    const el = scroller.current
+    el?.addEventListener('scroll', closeDefine, { passive: true, once: true })
+    return () => el?.removeEventListener('scroll', closeDefine)
+  }, [defineAt, closeDefine])
 
   useEffect(() => {
     let t: ReturnType<typeof setTimeout>
@@ -1521,6 +1560,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         onPointerUp={onPointerUp}
         onPointerCancel={() => (pointerDown.current = false)}
         onMouseMove={onMouseMove}
+        onDoubleClick={onDoubleClick}
         className="reader-scroll absolute inset-0 overflow-auto"
         tabIndex={-1}
       >
@@ -1850,11 +1890,13 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       </AnimatePresence>
 
       <SelectionToolbar
-        anchor={selAnchor}
+        anchor={defineAt ? null : selAnchor}
         onHighlight={(c) => createHighlight(c)}
         onNote={() => createHighlight(((() => { try { return localStorage.getItem('irb-last-color') } catch { return null } })() as HighlightColor) || 'yellow', true)}
         onCopy={copySelection}
+        onDefine={selAnchor?.word ? () => setDefineAt({ word: selAnchor.word!, rect: selAnchor.rect, below: selAnchor.below }) : undefined}
       />
+      <DefinePopover target={defineAt} onClose={closeDefine} />
       <HighlightPopover
         highlight={activeHighlight}
         anchor={active ? { rect: active.rect, below: touch } : null}
@@ -2032,6 +2074,7 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl 0', 'Reset zoom'],
   ['1 – 5', 'Highlight selection in a colour'],
   ['H', 'Highlight with last colour'],
+  ['A + double-click', 'Meaning of a word'],
   ['B', 'Bookmark page'],
   ['R', 'Recap this chapter'],
   ['T  ·  N', 'Contents · Notes'],

@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
-import { Check, Copy, StickyNote, Trash2 } from 'lucide-react'
+import { BookA, Check, Copy, StickyNote, Trash2 } from 'lucide-react'
 import type { Highlight, HighlightColor } from '../db/db'
 
 export const HL_COLORS: { key: HighlightColor; swatch: string; label: string }[] = [
@@ -14,7 +14,7 @@ export const HL_COLORS: { key: HighlightColor; swatch: string; label: string }[]
 
 export const swatchOf = (c: HighlightColor) => HL_COLORS.find((x) => x.key === c)!.swatch
 
-interface Anchor {
+export interface Anchor {
   rect: DOMRect
   /** Prefer placing below (touch devices, where the OS menu sits above a selection). */
   below?: boolean
@@ -62,14 +62,16 @@ function Swatches({ value, onPick }: { value?: HighlightColor; onPick: (c: Highl
 }
 
 export function SelectionToolbar({
-  anchor, onHighlight, onNote, onCopy,
+  anchor, onHighlight, onNote, onCopy, onDefine,
 }: {
   anchor: Anchor | null
   onHighlight: (c: HighlightColor) => void
   onNote: () => void
   onCopy: () => void
+  /** Shown when the selection is a word (or a short phrase): its meaning. */
+  onDefine?: () => void
 }) {
-  const pos = usePlacement(anchor, { w: 300, h: 44 })
+  const pos = usePlacement(anchor, { w: onDefine ? 336 : 300, h: 44 })
   return createPortal(
     <AnimatePresence>
       {anchor && (
@@ -93,6 +95,11 @@ export function SelectionToolbar({
           <ToolBtn label="Copy" onClick={onCopy}>
             <Copy className="size-4" />
           </ToolBtn>
+          {onDefine && (
+            <ToolBtn label="Meaning (A + double-click)" onClick={onDefine}>
+              <BookA className="size-4" />
+            </ToolBtn>
+          )}
         </motion.div>
       )}
     </AnimatePresence>,
