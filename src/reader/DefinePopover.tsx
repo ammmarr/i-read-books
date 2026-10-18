@@ -1,22 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
 import { ExternalLink, Volume2, X as XIcon } from 'lucide-react'
-import { define, OfflineError, type Meaning } from '../lib/dictionary'
+import { canSpeak, MeaningBody, sayWord, useMeaning, webSearchUrl } from '../components/Meaning'
+import { gistOf, noteLookup } from '../lib/words'
 import type { Anchor } from './HighlightTools'
 
 export interface DefineTarget extends Anchor {
   word: string
+  /** Looked up while reading: remembered for the Words page. */
+  source?: { bookId: string; page: number; top?: number; context?: string }
 }
 
-type State = { status: 'loading' } | { status: 'done'; meaning: Meaning } | { status: 'missing' } | { status: 'offline' } | { status: 'error' }
-
-const canSpeak = typeof window !== 'undefined' && 'speechSynthesis' in window
-
-/** A word's meaning, next to the word (A + double-click, or "Define" on a selection). */
+/** A word's meaning, next to the word (hold Shift and click it, or "Define" on a selection). */
 export function DefinePopover({ target, onClose }: { target: DefineTarget | null; onClose: () => void }) {
   const panel = useRef<HTMLDivElement>(null)
-  const [state, setState] = useState<State>({ status: 'loading' })
+  const state = useMeaning(target?.word)
 
   // Above or below the word, pinned to the edge next to it, so the card grows
   // away from the word as the meaning comes in.
@@ -34,18 +33,13 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
       : { below: false, style: { left, bottom: window.innerHeight - rect.top + gap, maxHeight: Math.min(maxH, above) } }
   }, [target])
 
+  // Once the dictionary has answered, the lookup goes on the Words page.
   useEffect(() => {
-    if (!target) return
-    const ctrl = new AbortController()
-    setState({ status: 'loading' })
-    define(target.word, ctrl.signal)
-      .then((meaning) => setState(meaning ? { status: 'done', meaning } : { status: 'missing' }))
-      .catch((e) => {
-        if (ctrl.signal.aborted) return
-        setState({ status: e instanceof OfflineError || !navigator.onLine ? 'offline' : 'error' })
-      })
-    return () => ctrl.abort()
-  }, [target?.word]) // eslint-disable-line react-hooks/exhaustive-deps
+    const src = target?.source
+    if (!target || !src || !state || state.word !== target.word) return
+    if (state.status !== 'done' && state.status !== 'missing') return
+    void noteLookup({ word: target.word, ...src, gist: state.status === 'done' ? gistOf(state.meaning) : undefined })
+  }, [state?.status, target]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!target) return
@@ -61,18 +55,11 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
     }
   }, [target, onClose])
 
-  const word = state.status === 'done' ? state.meaning.word : target?.word ?? ''
-  const say = () => {
-    const u = new SpeechSynthesisUtterance(word)
-    u.lang = 'en-US'
-    speechSynthesis.cancel()
-    speechSynthesis.speak(u)
-  }
-  const web = `https://www.google.com/search?q=${encodeURIComponent(`define ${target?.word ?? ''}`)}`
+  const word = state?.status === 'done' ? state.meaning.word : target?.word ?? ''
 
   return createPortal(
     <AnimatePresence>
-      {target && place && (
+      {target && place && state && (
         <motion.div
           ref={panel}
           key={target.word}
@@ -95,7 +82,7 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
               )}
             </div>
             {canSpeak && (
-              <button onClick={say} aria-label={`Say “${word}”`} title="Say it" className="grid size-8 shrink-0 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
+              <button onClick={() => sayWord(word)} aria-label={`Say “${word}”`} title="Say it" className="grid size-8 shrink-0 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
                 <Volume2 className="size-4" />
               </button>
             )}
@@ -105,36 +92,7 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
-            {state.status === 'loading' && (
-              <div className="space-y-2 py-1" aria-label="Looking it up">
-                <div className="skeleton h-3 w-16 rounded" />
-                <div className="skeleton h-4 w-full rounded" />
-                <div className="skeleton h-4 w-4/5 rounded" />
-              </div>
-            )}
-            {state.status === 'done' &&
-              state.meaning.groups.map((g, i) => (
-                <section key={i} className={i ? 'mt-3' : ''}>
-                  <div className="text-mono-eyebrow text-faint">
-                    {g.partOfSpeech}
-                    {g.language !== 'English' && ` · ${g.language}`}
-                  </div>
-                  <ol className="mt-1 space-y-1.5">
-                    {g.senses.map((s, j) => (
-                      <li key={j} className="flex gap-2 text-body-md text-body">
-                        {g.senses.length > 1 && <span className="tabular text-faint">{j + 1}.</span>}
-                        <div className="min-w-0">
-                          <p>{s.definition}</p>
-                          {s.example && <p className="mt-0.5 text-body-sm italic text-mute">“{s.example}”</p>}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </section>
-              ))}
-            {state.status === 'missing' && <p className="text-body-md text-body">No dictionary entry for “{target.word}”.</p>}
-            {state.status === 'offline' && <p className="text-body-md text-body">You’re offline. Meanings need the internet the first time; words you’ve looked up before work offline.</p>}
-            {state.status === 'error' && <p className="text-body-md text-body">Couldn’t reach the dictionary just now. Try again in a moment.</p>}
+            <MeaningBody state={state} />
           </div>
 
           <div className="flex items-center gap-3 border-t border-hairline px-4 py-2 text-body-sm">
@@ -145,7 +103,7 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
             ) : (
               <span className="text-faint">Wiktionary</span>
             )}
-            <a href={web} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-mute hover:text-ink">
+            <a href={webSearchUrl(target.word)} target="_blank" rel="noopener noreferrer" className="ml-auto inline-flex items-center gap-1 text-mute hover:text-ink">
               Search the web <ExternalLink className="size-3" />
             </a>
           </div>

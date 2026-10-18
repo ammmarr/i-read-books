@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import {
   db, markSyncTransaction, readTombstones, setLocalChangeListener, writeTombstones, SYNC_TABLES,
-  type Book, type Bookmark, type Highlight, type Recap, type Session, type SyncTable,
+  type Book, type Bookmark, type Highlight, type Recap, type Lookup, type Session, type SyncTable,
 } from '../db/db'
 import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
 import { formatPages, readPagesOf } from './pages'
@@ -52,6 +52,7 @@ const REMOTE: Record<SyncTable, string> = {
   bookmarks: 'irb_bookmarks',
   sessions: 'irb_sessions',
   recaps: 'irb_recaps',
+  lookups: 'irb_lookups',
 }
 
 /** Supabase's free plan caps a single upload at 50 MB. */
@@ -100,6 +101,13 @@ function toRemote(table: SyncTable, r: Row): Row {
         updated_at: c.updatedAt ?? Date.now(), deleted: false,
       }
     }
+    case 'lookups': {
+      const l = r as unknown as Lookup
+      return {
+        id: l.id, word: l.word, book_id: l.bookId, page: l.page, top_frac: n(l.top), context: n(l.context), gist: n(l.gist), looked_at: l.lookedAt,
+        updated_at: l.updatedAt ?? Date.now(), deleted: false,
+      }
+    }
   }
 }
 
@@ -145,6 +153,11 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
         reviewedAt: u(r.reviewed_at as number | null),
         // Older cloud schemas don't store these: a section's id gives it away.
         kind: (r.kind as string | undefined) ?? kindFromId(String(r.id)), parent: u((r.parent as string | null | undefined) ?? null),
+      }
+    case 'lookups':
+      return {
+        ...base, id: r.id, word: r.word ?? '', bookId: r.book_id, page: r.page ?? 0, top: u(r.top_frac as number | null), context: u(r.context as string | null),
+        gist: u(r.gist as string | null), lookedAt: r.looked_at ?? r.updated_at,
       }
   }
 }
@@ -352,6 +365,7 @@ function refreshWarning() {
   const parts: string[] = []
   if (missingColumns.size) parts.push('Your cloud database is older than this app, so a few details (like hand-edited progress) aren’t saved.')
   if (missingTables.has('irb_recaps')) parts.push('Chapter recaps aren’t syncing between your devices yet.')
+  if (missingTables.has('irb_lookups')) parts.push('Looked-up words aren’t syncing between your devices yet.')
   set({ warning: parts.length ? `${parts.join(' ')} Run the latest supabase/schema.sql once to finish the update.` : null })
 }
 

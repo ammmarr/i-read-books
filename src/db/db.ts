@@ -156,6 +156,25 @@ export interface Recap extends Synced {
   reviewedAt?: number
 }
 
+/**
+ * A word you looked up while reading — one record per lookup, so devices never
+ * collide; the Words page groups them by word.
+ */
+export interface Lookup extends Synced {
+  id: string
+  /** As looked up ("Buffett", "companies"). */
+  word: string
+  bookId: string
+  page: number
+  /** How far down the page (0–1), to open the book right there. */
+  top?: number
+  /** The sentence it was in. */
+  context?: string
+  /** Part of speech and first meaning ("noun · A force compounded by …"), readable offline and on other devices. */
+  gist?: string
+  lookedAt: number
+}
+
 class ReaderDB extends Dexie {
   books!: EntityTable<Book, 'id'>
   files!: EntityTable<BookFile, 'id'>
@@ -164,6 +183,7 @@ class ReaderDB extends Dexie {
   sessions!: EntityTable<Session, 'id'>
   settings!: EntityTable<Setting, 'key'>
   recaps!: EntityTable<Recap, 'id'>
+  lookups!: EntityTable<Lookup, 'id'>
 
   constructor() {
     super('i-read-books')
@@ -203,6 +223,7 @@ class ReaderDB extends Dexie {
           r.dirty = 1
         })
       })
+    this.version(5).stores({ lookups: 'id, word, bookId, lookedAt, updatedAt, dirty' })
   }
 }
 
@@ -221,8 +242,8 @@ export const uid = () =>
 // leave a tombstone. Writes made *by the sync engine* opt out by running in a
 // transaction registered with `markSyncTransaction`.
 
-export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps'
-export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps']
+export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps' | 'lookups'
+export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps', 'lookups']
 
 /** Fields that never leave this device, so changing them alone isn't a sync-worthy edit. */
 const LOCAL_ONLY = new Set(['cover', 'dirty', 'uploadError', 'enriched', 'positionBase', 'otherPosition'])

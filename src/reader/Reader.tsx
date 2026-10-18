@@ -21,7 +21,7 @@ import { DocText, findInPage, normalizeQuery, type Match } from './textIndex'
 import { HighlightPopover, SelectionToolbar, HL_COLORS } from './HighlightTools'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { wordFrom } from '../lib/dictionary'
-import { wordAtPoint } from './wordAt'
+import { placeOf, wordAtPoint } from './wordAt'
 import { selectionBox, selectionPieces } from './selection'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { ReaderSettings } from './ReaderSettings'
@@ -1188,6 +1188,11 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       el.classList.remove('lookup')
     }
   }, [lookup])
+  /** Where a looked-up word was (book, page, its sentence), for the Words page. */
+  const sourceOf = (node: Node | null | undefined, word: string) => {
+    const p = placeOf(node, word)
+    return p ? { bookId: book.id, ...p } : undefined
+  }
   const closeDefine = useCallback(() => setDefineAt(null), [])
   // It sits by the word: scrolling the page away closes it.
   useEffect(() => {
@@ -1287,7 +1292,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     if (lookupRef.current) {
       pointerDown.current = false
       const w = wordAtPoint(e.clientX, e.clientY)
-      if (w) setDefineAt({ word: w.word, rect: w.rect, below: false })
+      if (w) setDefineAt({ word: w.word, rect: w.rect, below: false, source: sourceOf(w.node, w.word) })
       return
     }
     pointerDown.current = false
@@ -1955,7 +1960,11 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         onHighlight={(c) => createHighlight(c)}
         onNote={() => createHighlight(((() => { try { return localStorage.getItem('irb-last-color') } catch { return null } })() as HighlightColor) || 'yellow', true)}
         onCopy={copySelection}
-        onDefine={selAnchor?.word ? () => setDefineAt({ word: selAnchor.word!, rect: selAnchor.rect, below: selAnchor.below }) : undefined}
+        onDefine={
+          selAnchor?.word
+            ? () => setDefineAt({ word: selAnchor.word!, rect: selAnchor.rect, below: selAnchor.below, source: sourceOf(window.getSelection()?.anchorNode, selAnchor.word!) })
+            : undefined
+        }
       />
       <DefinePopover target={defineAt} onClose={closeDefine} />
       <HighlightPopover

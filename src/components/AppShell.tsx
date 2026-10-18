@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { NavLink, useLocation, useOutlet } from "react-router";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  BookA,
   BookOpen,
   ChartColumn,
   Flame,
@@ -24,6 +25,7 @@ import { Button, IconButton } from "./ui/Button";
 const NAV = [
   { to: "/", label: "Library", icon: BookOpen },
   { to: "/list", label: "Reading list", short: "List", icon: ListOrdered },
+  { to: "/words", label: "Words", icon: BookA },
   { to: "/stats", label: "Insights", icon: ChartColumn },
   { to: "/settings", label: "Settings", icon: Settings },
 ];

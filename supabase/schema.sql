@@ -112,6 +112,22 @@ create table if not exists public.irb_recaps (
   deleted     boolean not null default false
 );
 
+-- Words looked up while reading (one row per lookup; the Words page groups them)
+create table if not exists public.irb_lookups (
+  id          uuid primary key,
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  word        text not null,
+  book_id     uuid,
+  page        int,
+  top_frac    double precision,
+  context     text,
+  gist        text,
+  looked_at   bigint,
+  updated_at  bigint not null,
+  server_ts   bigint,
+  deleted     boolean not null default false
+);
+
 create table if not exists public.irb_profiles (
   user_id     uuid primary key default auth.uid() references auth.users on delete cascade,
   settings    jsonb,
@@ -130,7 +146,7 @@ alter table public.irb_recaps add column if not exists parent text;
 do $$
 declare t text;
 begin
-  foreach t in array array['irb_books', 'irb_highlights', 'irb_bookmarks', 'irb_sessions', 'irb_recaps', 'irb_profiles'] loop
+  foreach t in array array['irb_books', 'irb_highlights', 'irb_bookmarks', 'irb_sessions', 'irb_recaps', 'irb_lookups', 'irb_profiles'] loop
     execute format('drop trigger if exists %1$s_touch on public.%1$s', t);
     execute format('create trigger %1$s_touch before insert or update on public.%1$s for each row execute function public.irb_touch()', t);
     execute format('create index if not exists %1$s_user_ts on public.%1$s (user_id, server_ts)', t);
