@@ -235,6 +235,18 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
   100% { box-shadow: 0 0 0 2px rgb(255 140 0 / 0.9); }
 }
 
+/* Holding Shift: every word is underlined — click one for its meaning … */
+.reader-scroll.lookup .textLayer :is(span, br) { cursor: pointer; }
+.reader-scroll.lookup .textLayer span:not(.markedContent) {
+  text-decoration: underline dotted color-mix(in srgb, var(--color-link) 65%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.18em;
+}
+/* … and the one under the mouse turns blue: the text itself, on any page theme. */
+.lookup-word { position: fixed; z-index: 30; pointer-events: none; border-radius: 2px; background: #1d6ff2; mix-blend-mode: screen; }
+.page-theme-night .lookup-word { background: #6aa8ff; mix-blend-mode: multiply; }
+.lookup-line { position: fixed; z-index: 30; height: 2px; pointer-events: none; border-radius: 1px; background: var(--color-link); }
+
 /* Text layer selection tint that reads on both paper and night pages. */
 .textLayer ::selection { background: rgb(0 112 243 / 0.28); }
 

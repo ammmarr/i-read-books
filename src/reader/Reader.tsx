@@ -21,6 +21,7 @@ import { DocText, findInPage, normalizeQuery, type Match } from './textIndex'
 import { HighlightPopover, SelectionToolbar, HL_COLORS } from './HighlightTools'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { wordFrom } from '../lib/dictionary'
+import { wordAtPoint } from './wordAt'
 import { selectionBox, selectionPieces } from './selection'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { ReaderSettings } from './ReaderSettings'
@@ -1121,33 +1122,72 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   }, [touch])
 
   // ── A word's meaning ──────────────────────────────────────────────────
-  // Hold A and double-click a word (or select it and tap the book icon —
-  // the way on a tablet): its meaning, right there.
+  // Hold Shift: the words underline, the one under the mouse turns blue, and
+  // clicking it shows its meaning. (Tablet: select a word, then the book icon.)
   const [defineAt, setDefineAt] = useState<DefineTarget | null>(null)
-  const aHeld = useRef(false)
+  const [lookup, setLookup] = useState(false)
+  const lookupRef = useRef(false)
+  lookupRef.current = lookup
+  const [hoverWord, setHoverWord] = useState<{ word: string; rects: DOMRect[] } | null>(null)
+  /** Where the mouse is, so holding Shift can light up the word already under it. */
+  const mouseAt = useRef<{ x: number; y: number } | null>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key.toLowerCase() !== 'a') return
-      const typing = e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')
-      aHeld.current = e.type === 'keydown' && !typing && !e.ctrlKey && !e.metaKey && !e.altKey
+    let t: ReturnType<typeof setTimeout> | undefined
+    const off = () => {
+      clearTimeout(t)
+      setLookup(false)
     }
-    const off = () => (aHeld.current = false)
-    window.addEventListener('keydown', onKey)
-    window.addEventListener('keyup', onKey)
+    const onDown = (e: KeyboardEvent) => {
+      // Shift with another key is a shortcut (Shift+arrows, Shift+Space, ?), not looking up.
+      if (e.key !== 'Shift') return off()
+      if (e.repeat) return
+      const typing = e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')
+      if (typing || e.ctrlKey || e.metaKey || e.altKey) return
+      clearTimeout(t)
+      t = setTimeout(() => setLookup(true), 120)
+    }
+    const onUp = (e: KeyboardEvent) => {
+      if (e.key === 'Shift') off()
+    }
+    window.addEventListener('keydown', onDown)
+    window.addEventListener('keyup', onUp)
     window.addEventListener('blur', off)
     return () => {
-      window.removeEventListener('keydown', onKey)
-      window.removeEventListener('keyup', onKey)
+      clearTimeout(t)
+      window.removeEventListener('keydown', onDown)
+      window.removeEventListener('keyup', onUp)
       window.removeEventListener('blur', off)
     }
   }, [])
-  const onDoubleClick = () => {
-    if (!aHeld.current) return
-    // The double-click has just selected the word under the mouse.
-    const word = wordFrom(window.getSelection()?.toString() ?? '')
-    const box = selectionBox()
-    if (word && box) setDefineAt({ word, rect: box, below: false })
-  }
+  // While looking up: follow the word under the mouse. (A class on the
+  // scroller, not className: that one also carries the cursor-away class.)
+  useEffect(() => {
+    const el = scroller.current
+    if (!el) return
+    el.classList.toggle('lookup', lookup)
+    if (!lookup) return setHoverWord(null)
+    const update = () => {
+      const p = mouseAt.current
+      const w = p ? wordAtPoint(p.x, p.y) : null
+      setHoverWord((cur) => {
+        if (!w) return null
+        const same = cur && cur.word === w.word && cur.rects[0]?.left === w.rects[0]?.left && cur.rects[0]?.top === w.rects[0]?.top
+        return same ? cur : { word: w.word, rects: w.rects }
+      })
+    }
+    const onMove = (e: PointerEvent) => {
+      mouseAt.current = { x: e.clientX, y: e.clientY }
+      update()
+    }
+    update()
+    window.addEventListener('pointermove', onMove, { passive: true })
+    el.addEventListener('scroll', update, { passive: true })
+    return () => {
+      window.removeEventListener('pointermove', onMove)
+      el.removeEventListener('scroll', update)
+      el.classList.remove('lookup')
+    }
+  }, [lookup])
   const closeDefine = useCallback(() => setDefineAt(null), [])
   // It sits by the word: scrolling the page away closes it.
   useEffect(() => {
@@ -1227,6 +1267,11 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   const singleTapTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   const onPointerDown = (e: React.PointerEvent) => {
+    // Holding Shift, a click looks the word up (on release) — no selecting.
+    if (lookupRef.current) {
+      tap.current = null
+      return
+    }
     pointerDown.current = true
     // Link hotspots handle their own clicks.
     if ((e.target as HTMLElement).closest('.pdf-link')) {
@@ -1239,6 +1284,12 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
+    if (lookupRef.current) {
+      pointerDown.current = false
+      const w = wordAtPoint(e.clientX, e.clientY)
+      if (w) setDefineAt({ word: w.word, rect: w.rect, below: false })
+      return
+    }
     pointerDown.current = false
     document.querySelectorAll('.textLayer.selecting').forEach((l) => l.classList.remove('selecting'))
     const start = tap.current
@@ -1277,6 +1328,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
 
   // Mouse near the top/bottom edge reveals the chrome on desktop.
   const onMouseMove = (e: React.MouseEvent) => {
+    mouseAt.current = { x: e.clientX, y: e.clientY }
     if (touch || chrome) return
     const r = scroller.current?.getBoundingClientRect()
     if (!r) return
@@ -1560,7 +1612,8 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         onPointerUp={onPointerUp}
         onPointerCancel={() => (pointerDown.current = false)}
         onMouseMove={onMouseMove}
-        onDoubleClick={onDoubleClick}
+        // Holding Shift: no text selection (Shift+click would extend one).
+        onMouseDown={(e) => lookupRef.current && e.preventDefault()}
         className="reader-scroll absolute inset-0 overflow-auto"
         tabIndex={-1}
       >
@@ -1782,6 +1835,14 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Holding Shift: the word under the mouse, in blue */}
+      {hoverWord?.rects.map((r, i) => (
+        <div key={i} aria-hidden>
+          <div className="lookup-word" style={{ left: r.left, top: r.top, width: r.width, height: r.height }} />
+          <div className="lookup-line" style={{ left: r.left, top: r.bottom, width: r.width }} />
+        </div>
+      ))}
 
       {/* Left open? "Still reading?" — unanswered, the still time stops counting */}
       <AnimatePresence>
@@ -2074,7 +2135,7 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl 0', 'Reset zoom'],
   ['1 – 5', 'Highlight selection in a colour'],
   ['H', 'Highlight with last colour'],
-  ['A + double-click', 'Meaning of a word'],
+  ['Hold Shift, click a word', 'Its meaning'],
   ['B', 'Bookmark page'],
   ['R', 'Recap this chapter'],
   ['T  ·  N', 'Contents · Notes'],

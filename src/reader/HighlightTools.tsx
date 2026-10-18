@@ -96,7 +96,7 @@ export function SelectionToolbar({
             <Copy className="size-4" />
           </ToolBtn>
           {onDefine && (
-            <ToolBtn label="Meaning (A + double-click)" onClick={onDefine}>
+            <ToolBtn label="Meaning (or hold Shift and click a word)" onClick={onDefine}>
               <BookA className="size-4" />
             </ToolBtn>
           )}
