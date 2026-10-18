@@ -45,6 +45,19 @@ export function readCount(b: Pick<Book, 'readPages' | 'furthestPage' | 'pageCoun
 }
 
 /**
+ * The first page from where you are on that you haven't read — when it's
+ * further on (say you read to page 70 on the laptop, then the tablet left you
+ * at page 50). Null when it's right here, or the book is done.
+ */
+export function unreadAhead(b: Pick<Book, 'readPages' | 'furthestPage' | 'pageCount' | 'currentPage' | 'status'>): number | null {
+  if (b.status === 'finished' || !b.pageCount) return null
+  const read = readPagesOf(b)
+  let p = Math.max(0, b.currentPage)
+  while (p < b.pageCount && read.has(p)) p++
+  return p < b.pageCount && p >= b.currentPage + 2 ? p : null
+}
+
+/**
  * Seconds a page must stay in view (while you're active) to count as read:
  * a quarter of its expected reading time at ~1,500 characters a minute,
  * between 3 s (images, near-empty pages) and 15 s (dense text).

@@ -58,6 +58,8 @@ export interface OpenAt {
   /** How far down the page (0–1). */
   top: number
   highlightId?: string
+  /** Go on reading from there (it becomes your spot), rather than just looking. */
+  move?: boolean
 }
 
 export default function Reader() {
@@ -394,14 +396,16 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     el.scrollLeft = (layout.contentW - vp.w) / 2
     if (openAt) {
       // Opened at a note from the book's page: show it, and keep your place.
+      // Or "Continue from page N": read on from there (it's saved as your spot).
       const i = Math.min(openAt.page, last)
-      el.scrollTop = layout.tops[i] + openAt.top * layout.heights[i] - el.clientHeight * 0.35
+      el.scrollTop = layout.tops[i] + openAt.top * layout.heights[i] - (openAt.move ? 16 : el.clientHeight * 0.35)
       movedHere.current = true
+      if (openAt.move) posQuietUntil.current = 0
       if (i !== book.currentPage) {
         const p = { page: Math.min(book.currentPage, last), frac: book.pageOffset }
         placeRef.current = p
         setPlace(p)
-        landed.current = { page: i, peek: true }
+        landed.current = { page: i, peek: !openAt.move }
       }
       return
     }

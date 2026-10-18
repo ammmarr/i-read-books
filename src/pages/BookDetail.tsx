@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowLeft, BookOpen, Copy, ExternalLink, FilePlus, Pencil, Trash2 } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChevronsRight, Copy, ExternalLink, FilePlus, Pencil, Trash2 } from 'lucide-react'
 import { useImporter } from '../components/Importer'
-import { readCount } from '../lib/pages'
+import { readCount, unreadAhead } from '../lib/pages'
+import { continueFrom } from '../lib/openBook'
 import { db, type Highlight, type HighlightColor } from '../db/db'
 import type { OpenAt } from '../reader/Reader'
 import { bookProgress, renameBook, setPagesRead, setStatus } from '../db/books'
@@ -66,6 +67,7 @@ export default function BookDetail() {
   const overall = summarize(sessions, 0, Infinity).pagesPerHour
   const st = bookStats(book, sessions, overall)
   const p = bookProgress(book)
+  const unread = unreadAhead(book)
   const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || a.rects[0][1] - b.rects[0][1])
 
   // Opens the reader at the note; where you left off reading stays put
@@ -138,10 +140,18 @@ export default function BookDetail() {
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             {book.pageCount > 0 ? (
-              <Button size="lg" onClick={() => navigate(`/read/${book.id}`)}>
-                <BookOpen className="size-4" />
-                {book.status === 'finished' ? 'Read again' : book.lastOpenedAt ? 'Resume' : 'Start reading'}
-              </Button>
+              <>
+                <Button size="lg" onClick={() => navigate(`/read/${book.id}`)}>
+                  <BookOpen className="size-4" />
+                  {book.status === 'finished' ? 'Read again' : book.lastOpenedAt ? `Resume · p. ${book.currentPage + 1}` : 'Start reading'}
+                </Button>
+                {unread != null && (
+                  <Button size="lg" variant="outline" onClick={() => continueFrom(navigate, book.id, unread)} title="The first page you haven’t read yet">
+                    <ChevronsRight className="size-4" />
+                    Continue from p. {unread + 1}
+                  </Button>
+                )}
+              </>
             ) : (
               <Button size="lg" onClick={() => attach(book.id)}>
                 <FilePlus className="size-4" /> Add PDF

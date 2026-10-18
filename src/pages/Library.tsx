@@ -2,7 +2,9 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDownUp, BookOpen, FilePlus, Flame, Plus, Search, X } from 'lucide-react'
+import { ArrowDownUp, BookOpen, ChevronsRight, FilePlus, Flame, Plus, Search, X } from 'lucide-react'
+import { unreadAhead } from '../lib/pages'
+import { continueFrom } from '../lib/openBook'
 import { db, type Book, type BookStatus } from '../db/db'
 import { bookProgress } from '../db/books'
 import { PageContainer } from '../components/AppShell'
@@ -202,6 +204,7 @@ function ContinueCard({ book, sessions }: { book: Book; sessions: import('../db/
   const overall = summarize(sessions, 0, Infinity).pagesPerHour
   const stats = bookStats(book, sessions, overall)
   const progress = bookProgress(book)
+  const unread = unreadAhead(book)
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -238,11 +241,17 @@ function ContinueCard({ book, sessions }: { book: Book; sessions: import('../db/
             )}
           </div>
           <ProgressBar value={progress} />
-          <div className="mt-4 flex items-center gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             <Button onClick={() => navigate(`/read/${book.id}`)} size="md">
               <BookOpen className="size-4" />
               Resume
             </Button>
+            {unread != null && (
+              <Button variant="outline" size="md" onClick={() => continueFrom(navigate, book.id, unread)} title="The first page you haven’t read yet">
+                <ChevronsRight className="size-4" />
+                Continue from p. {unread + 1}
+              </Button>
+            )}
             <Button variant="ghost" onClick={() => navigate(`/book/${book.id}`)} className="hidden sm:inline-flex">
               Details
             </Button>
