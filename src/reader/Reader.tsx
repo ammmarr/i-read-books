@@ -1339,8 +1339,6 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       return
     }
     tap.current = { x: e.clientX, y: e.clientY, t: performance.now(), type: e.pointerType }
-    const layer = (e.target as HTMLElement).closest('.textLayer')
-    if (layer && e.pointerType === 'mouse') layer.classList.add('selecting')
   }
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -1357,7 +1355,6 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       return
     }
     pointerDown.current = false
-    document.querySelectorAll('.textLayer.selecting').forEach((l) => l.classList.remove('selecting'))
     const start = tap.current
     tap.current = null
     setTimeout(refreshSelection, 10)

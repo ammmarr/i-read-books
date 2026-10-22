@@ -4,6 +4,7 @@ import { pdfjs, readLinks, type PDFDocumentProxy, type PdfLink } from '../lib/pd
 import type { Highlight, NormRect } from '../db/db'
 import { rangeFor, type DocText } from './textIndex'
 import { pictureLayers } from './pictures'
+import { guardSelection } from './selectionGuard'
 
 /** Keep each canvas under ~16 MP — mobile browsers silently fail above that. */
 const MAX_CANVAS_PIXELS = 16_000_000
@@ -115,6 +116,7 @@ export const PageView = memo(function PageView({
   // Text layer: created once per page, then just re-laid-out on zoom.
   useEffect(() => {
     let cancelled = false
+    let unguard: (() => void) | undefined
     const el = textEl.current
     if (!el) return
     ;(async () => {
@@ -128,10 +130,13 @@ export const PageView = memo(function PageView({
       const end = document.createElement('div')
       end.className = 'endOfContent'
       el.append(end)
+      // A dragged selection (finger or mouse) stays where it's dragged.
+      unguard = guardSelection(el, end)
       setTextReady((n) => n + 1)
     })()
     return () => {
       cancelled = true
+      unguard?.()
       textLayer.current?.cancel()
       textLayer.current = null
       el.replaceChildren()
