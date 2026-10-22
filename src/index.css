@@ -236,7 +236,8 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
 }
 
 /* Holding Shift: every word is underlined — click one for its meaning … */
-.reader-scroll.lookup .textLayer :is(span, br) { cursor: pointer; }
+/* (and no text selection meanwhile — on a tablet the system's menu would take over the tap) */
+.reader-scroll.lookup .textLayer :is(span, br) { cursor: pointer; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .reader-scroll.lookup .textLayer span:not(.markedContent) {
   text-decoration: underline dotted color-mix(in srgb, var(--color-link) 65%, transparent);
   text-decoration-thickness: 1.5px;

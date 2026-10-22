@@ -33,12 +33,13 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
       : { below: false, style: { left, bottom: window.innerHeight - rect.top + gap, maxHeight: Math.min(maxH, above) } }
   }, [target])
 
-  // Once the dictionary has answered, the lookup goes on the Words page.
+  // The lookup goes on the Words page — offline too: its meaning is filled
+  // in there once the device is back online (fillMissingMeanings).
   useEffect(() => {
     const src = target?.source
-    if (!target || !src || !state || state.word !== target.word) return
-    if (state.status !== 'done' && state.status !== 'missing') return
-    void noteLookup({ word: target.word, ...src, gist: state.status === 'done' ? gistOf(state.meaning) : undefined })
+    if (!target || !src || !state || state.word !== target.word || state.status === 'loading') return
+    const gist = state.status === 'done' ? gistOf(state.meaning) : state.status === 'missing' ? '' : undefined
+    void noteLookup({ word: target.word, ...src, gist })
   }, [state?.status, target]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -92,7 +93,7 @@ export function DefinePopover({ target, onClose }: { target: DefineTarget | null
           </div>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-3">
-            <MeaningBody state={state} />
+            <MeaningBody state={state} saved={!!target.source} />
           </div>
 
           <div className="flex items-center gap-3 border-t border-hairline px-4 py-2 text-body-sm">

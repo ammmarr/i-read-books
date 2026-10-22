@@ -1,5 +1,5 @@
 import { db, uid, type Lookup } from '../db/db'
-import type { Meaning } from './dictionary'
+import { define, type Meaning } from './dictionary'
 
 /** Opening the same word's card again within this is still one lookup. */
 const SAME_LOOKUP_MS = 10 * 60_000
@@ -60,11 +60,43 @@ export function groupLookups(lookups: Lookup[]): WordEntry[] {
         count: ls.length,
         firstAt: sorted[sorted.length - 1].lookedAt,
         lastAt: latest.lookedAt,
-        gist: sorted.find((l) => l.gist)?.gist,
+        // '' is "no dictionary entry"; undefined is "not looked up yet" (offline).
+        gist: sorted.find((l) => l.gist)?.gist ?? (sorted.some((l) => l.gist === '') ? '' : undefined),
         latest,
         bookIds: [...new Set(sorted.map((l) => l.bookId))],
         lookups: sorted,
       }
     })
     .sort((a, b) => b.lastAt - a.lastAt)
+}
+
+/**
+ * Words looked up offline (here or on another device) get their meaning once
+ * this device is online: runs at start, when the connection comes back, and
+ * when the Words page opens.
+ */
+let filling = false
+export async function fillMissingMeanings() {
+  if (filling || !navigator.onLine) return
+  filling = true
+  try {
+    const todo = [...new Set((await db.lookups.toArray()).filter((l) => l.gist == null).map((l) => l.word))]
+    for (const word of todo) {
+      let gist: string
+      try {
+        const m = await define(word)
+        gist = (m && gistOf(m)) || ''
+      } catch {
+        if (!navigator.onLine) break
+        continue
+      }
+      await db.lookups
+        .where('word')
+        .equals(word)
+        .filter((l) => l.gist == null)
+        .modify({ gist })
+    }
+  } finally {
+    filling = false
+  }
 }

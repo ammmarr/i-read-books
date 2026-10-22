@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
-import { BookA, Check, Copy, StickyNote, Trash2 } from 'lucide-react'
+import { BookA, Check, Copy, Eraser, StickyNote, Trash2 } from 'lucide-react'
 import type { Highlight, HighlightColor } from '../db/db'
 
 export const HL_COLORS: { key: HighlightColor; swatch: string; label: string }[] = [
@@ -62,16 +62,18 @@ function Swatches({ value, onPick }: { value?: HighlightColor; onPick: (c: Highl
 }
 
 export function SelectionToolbar({
-  anchor, onHighlight, onNote, onCopy, onDefine,
+  anchor, onHighlight, onNote, onCopy, onDefine, onRemove,
 }: {
   anchor: Anchor | null
   onHighlight: (c: HighlightColor) => void
   onNote: () => void
   onCopy: () => void
+  /** Shown when the selection runs into highlights: remove them. */
+  onRemove?: () => void
   /** Shown when the selection is a word (or a short phrase): its meaning. */
   onDefine?: () => void
 }) {
-  const pos = usePlacement(anchor, { w: onDefine ? 336 : 300, h: 44 })
+  const pos = usePlacement(anchor, { w: 300 + (onDefine ? 36 : 0) + (onRemove ? 36 : 0), h: 44 })
   return createPortal(
     <AnimatePresence>
       {anchor && (
@@ -95,6 +97,11 @@ export function SelectionToolbar({
           <ToolBtn label="Copy" onClick={onCopy}>
             <Copy className="size-4" />
           </ToolBtn>
+          {onRemove && (
+            <ToolBtn label="Remove highlight" onClick={onRemove} danger>
+              <Eraser className="size-4" />
+            </ToolBtn>
+          )}
           {onDefine && (
             <ToolBtn label="Meaning (or hold Shift and click a word)" onClick={onDefine}>
               <BookA className="size-4" />

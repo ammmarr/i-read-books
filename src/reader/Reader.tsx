@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, NotebookPen, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
+  ArrowLeft, BookA, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, NotebookPen, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
@@ -22,7 +22,7 @@ import { HighlightPopover, SelectionToolbar, HL_COLORS } from './HighlightTools'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { wordFrom } from '../lib/dictionary'
 import { placeOf, wordAtPoint } from './wordAt'
-import { selectionBox, selectionPieces } from './selection'
+import { extendSelectionOver, highlightsUnder, mergeRects, selectionBox, selectionPieces } from './selection'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { ReaderSettings } from './ReaderSettings'
 import { SearchPanel } from './SearchPanel'
@@ -1099,7 +1099,9 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   }, [])
 
   // ── Selection → highlight ─────────────────────────────────────────────
-  const [selAnchor, setSelAnchor] = useState<{ rect: DOMRect; below?: boolean; word?: string | null } | null>(null)
+  const [selAnchor, setSelAnchor] = useState<{ rect: DOMRect; below?: boolean; word?: string | null; under?: Highlight[] } | null>(null)
+  const highlightsRef = useRef(highlights)
+  highlightsRef.current = highlights
   const pointerDown = useRef(false)
   const [freshId, setFreshId] = useState<string | null>(null)
   const [flashId, setFlashId] = useState<string | null>(null)
@@ -1122,14 +1124,19 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     const sel = window.getSelection()
     if (!el || !sel || sel.isCollapsed || !sel.rangeCount || !el.contains(sel.anchorNode)) return setSelAnchor(null)
     const box = selectionBox()
-    setSelAnchor(box ? { rect: box, below: touch, word: wordFrom(sel.toString()) } : null)
+    const under = box ? highlightsUnder(selectionPieces(el), highlightsRef.current) : []
+    setSelAnchor(box ? { rect: box, below: touch, word: wordFrom(sel.toString()), under } : null)
   }, [touch])
 
   // ── A word's meaning ──────────────────────────────────────────────────
   // Hold Shift: the words underline, the one under the mouse turns blue, and
   // clicking it shows its meaning. (Tablet: select a word, then the book icon.)
   const [defineAt, setDefineAt] = useState<DefineTarget | null>(null)
-  const [lookup, setLookup] = useState(false)
+  // Looking words up: while Shift is held, or with the "Look up words" toggle
+  // on (the way on a tablet — the system's own text selection stays out of it).
+  const [shiftHeld, setShiftHeld] = useState(false)
+  const [lookupOn, setLookupOn] = useState(false)
+  const lookup = shiftHeld || lookupOn
   const lookupRef = useRef(false)
   lookupRef.current = lookup
   const [hoverWord, setHoverWord] = useState<{ word: string; rects: DOMRect[] } | null>(null)
@@ -1139,7 +1146,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     let t: ReturnType<typeof setTimeout> | undefined
     const off = () => {
       clearTimeout(t)
-      setLookup(false)
+      setShiftHeld(false)
     }
     const onDown = (e: KeyboardEvent) => {
       // Shift with another key is a shortcut (Shift+arrows, Shift+Space, ?), not looking up.
@@ -1148,7 +1155,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       const typing = e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable="true"]')
       if (typing || e.ctrlKey || e.metaKey || e.altKey) return
       clearTimeout(t)
-      t = setTimeout(() => setLookup(true), 120)
+      t = setTimeout(() => setShiftHeld(true), 120)
     }
     const onUp = (e: KeyboardEvent) => {
       if (e.key === 'Shift') off()
@@ -1180,6 +1187,8 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       })
     }
     const onMove = (e: PointerEvent) => {
+      // A finger moving is scrolling, not pointing at words.
+      if (e.pointerType !== 'mouse') return
       mouseAt.current = { x: e.clientX, y: e.clientY }
       update()
     }
@@ -1197,7 +1206,11 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     const p = placeOf(node, word)
     return p ? { bookId: book.id, ...p } : undefined
   }
-  const closeDefine = useCallback(() => setDefineAt(null), [])
+  const closeDefine = useCallback(() => {
+    setDefineAt(null)
+    // A tapped word (no mouse) stops being blue with its card.
+    if (!mouseAt.current) setHoverWord(null)
+  }, [])
   // It sits by the word: scrolling the page away closes it.
   useEffect(() => {
     if (!defineAt) return
@@ -1224,11 +1237,36 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     async (color: HighlightColor, withNote = false) => {
       const root = content.current
       if (!root) return
-      const pieces = selectionPieces(root)
+      let pieces = selectionPieces(root)
       if (!pieces.length) return
+      // Over a highlight of the same colour: one highlight covering both, not a
+      // second, darker layer. (A different colour may overlap.)
+      const same = highlightsUnder(pieces, highlights, color)
+      let readOk = true
+      if (same.length) {
+        readOk = extendSelectionOver(root, same)
+        pieces = selectionPieces(root)
+        if (!pieces.length) return
+      }
       const now = Date.now()
-      const made: Highlight[] = pieces.map((p) => ({ id: uid(), bookId: book.id, page: p.page, color, text: p.text, rects: p.rects, createdAt: now, updatedAt: now }))
-      await db.highlights.bulkAdd(made)
+      const made: Highlight[] = pieces.map((p) => {
+        const joined = same.filter((h) => h.page === p.page)
+        const longest = joined.reduce((t, h) => (h.text.length > t.length ? h.text : t), p.text)
+        const notes = joined.map((h) => h.note?.trim()).filter(Boolean)
+        return {
+          id: uid(), bookId: book.id, page: p.page, color,
+          // If an old one's ends were off screen, keep its rects (and its text if longer).
+          text: readOk ? p.text : longest,
+          rects: readOk ? p.rects : mergeRects([...p.rects, ...joined.flatMap((h) => h.rects)]),
+          note: notes.length ? notes.join(String.fromCharCode(10, 10)) : undefined,
+          createdAt: joined.length ? Math.min(...joined.map((h) => h.createdAt)) : now,
+          updatedAt: now,
+        }
+      })
+      await db.transaction('rw', db.highlights, async () => {
+        if (same.length) await db.highlights.bulkDelete(same.map((h) => h.id))
+        await db.highlights.bulkAdd(made)
+      })
       const box = selectionBox()
       window.getSelection()?.removeAllRanges()
       setSelAnchor(null)
@@ -1240,7 +1278,20 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       } catch { /* ignore */ }
       if (withNote && box) setActive({ id: made[0].id, rect: box, focusNote: true })
     },
-    [book.id],
+    [book.id, highlights],
+  )
+
+  /** Remove the highlights a selection runs into (with Undo). */
+  const removeHighlights = useCallback(
+    async (hs: Highlight[]) => {
+      if (!hs.length) return
+      window.getSelection()?.removeAllRanges()
+      setSelAnchor(null)
+      setActive(null)
+      await db.highlights.bulkDelete(hs.map((h) => h.id))
+      toast({ message: hs.length === 1 ? 'Highlight removed' : `${hs.length} highlights removed`, action: { label: 'Undo', onClick: () => void db.highlights.bulkPut(hs) } })
+    },
+    [toast],
   )
 
   const copySelection = useCallback(async () => {
@@ -1278,7 +1329,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   const onPointerDown = (e: React.PointerEvent) => {
     // Holding Shift, a click looks the word up (on release) — no selecting.
     if (lookupRef.current) {
-      tap.current = null
+      tap.current = { x: e.clientX, y: e.clientY, t: performance.now(), type: e.pointerType }
       return
     }
     pointerDown.current = true
@@ -1295,8 +1346,14 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
   const onPointerUp = (e: React.PointerEvent) => {
     if (lookupRef.current) {
       pointerDown.current = false
+      const start = tap.current
+      tap.current = null
+      // A tap, not the end of a swipe or a long press.
+      if (!start || Math.hypot(e.clientX - start.x, e.clientY - start.y) > 10 || performance.now() - start.t > 700) return
       const w = wordAtPoint(e.clientX, e.clientY)
-      if (w) setDefineAt({ word: w.word, rect: w.rect, below: false, source: sourceOf(w.node, w.word) })
+      if (!w) return
+      if (e.pointerType !== 'mouse') setHoverWord({ word: w.word, rects: w.rects })
+      setDefineAt({ word: w.word, rect: w.rect, below: e.pointerType !== 'mouse', source: sourceOf(w.node, w.word) })
       return
     }
     pointerDown.current = false
@@ -1707,6 +1764,19 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
               <IconButton label="Search (/)" tipBelow active={searchOpen} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}>
                 <Search className="size-[18px]" />
               </IconButton>
+              <IconButton
+                label={lookupOn ? 'Stop looking up words' : touch ? 'Look up words' : 'Look up words (or hold Shift)'}
+                tipBelow
+                active={lookupOn}
+                aria-pressed={lookupOn}
+                onClick={() => {
+                  const on = !lookupOn
+                  setLookupOn(on)
+                  if (on) toast({ id: 'lookup', message: `${touch ? 'Tap' : 'Click'} a word to see its meaning`, description: 'Tap the book icon again when you’re done.', duration: 3000 })
+                }}
+              >
+                <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />
+              </IconButton>
               <IconButton label={bookmarked ? 'Remove bookmark (B)' : 'Bookmark page (B)'} tipBelow onClick={toggleBookmark}>
                 <motion.span key={String(bookmarked)} initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 600, damping: 18 }} className="grid">
                   <BookmarkIcon className={`size-[18px] ${bookmarked ? 'fill-link text-link' : ''}`} />
@@ -1964,6 +2034,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         onHighlight={(c) => createHighlight(c)}
         onNote={() => createHighlight(((() => { try { return localStorage.getItem('irb-last-color') } catch { return null } })() as HighlightColor) || 'yellow', true)}
         onCopy={copySelection}
+        onRemove={selAnchor?.under?.length ? () => removeHighlights(selAnchor.under!) : undefined}
         onDefine={
           selAnchor?.word
             ? () => setDefineAt({ word: selAnchor.word!, rect: selAnchor.rect, below: selAnchor.below, source: sourceOf(window.getSelection()?.anchorNode, selAnchor.word!) })
@@ -2010,6 +2081,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
           scrollToPage(p)
         }}
         onJumpHighlight={jumpToHighlight}
+        onDeleteHighlight={(h) => removeHighlights([h])}
         onToggleBookmark={toggleBookmark}
         onDeleteBookmark={(b) => db.bookmarks.delete(b.id)}
         onCopyAll={copyAllHighlights}

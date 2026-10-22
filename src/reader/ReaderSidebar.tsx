@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import { Bookmark as BookmarkIcon, BookmarkPlus, ChevronRight, Copy, Highlighter, ListTree, NotebookPen, X } from 'lucide-react'
+import { Bookmark as BookmarkIcon, BookmarkPlus, ChevronRight, Copy, Highlighter, ListTree, NotebookPen, Trash2, X } from 'lucide-react'
 import type { Book, Bookmark, Highlight, HighlightColor, Recap } from '../db/db'
 import { coverage, kindOf, MIN_RECAP_PAGES, RECAP_COVERAGE, recapId, type Chapter } from '../lib/recaps'
 import { readPagesOf } from '../lib/pages'
@@ -26,6 +26,7 @@ interface Props {
   bookmarks: Bookmark[]
   onJump: (page: number) => void
   onJumpHighlight: (h: Highlight) => void
+  onDeleteHighlight?: (h: Highlight) => void
   onToggleBookmark: () => void
   onDeleteBookmark: (b: Bookmark) => void
   onCopyAll: () => void
@@ -236,7 +237,7 @@ function OutlineNode({
   )
 }
 
-function Highlights({ highlights, onJumpHighlight, onCopyAll }: Props) {
+function Highlights({ highlights, onJumpHighlight, onDeleteHighlight, onCopyAll }: Props) {
   const [color, setColor] = useState<HighlightColor | 'all'>('all')
   const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || a.rects[0][1] - b.rects[0][1])
   if (!highlights.length)
@@ -267,8 +268,18 @@ function Highlights({ highlights, onJumpHighlight, onCopyAll }: Props) {
       <ul className="space-y-0.5">
         <AnimatePresence initial={false}>
           {list.map((h) => (
-            <motion.li key={h.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, height: 0 }}>
-              <button onClick={() => onJumpHighlight(h)} className="flex w-full gap-3 rounded-sm px-2 py-2.5 text-left transition-colors hover:bg-hairline-soft">
+            <motion.li key={h.id} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, height: 0 }} className="group relative">
+              {onDeleteHighlight && (
+                <button
+                  aria-label="Remove highlight"
+                  title="Remove highlight"
+                  onClick={() => onDeleteHighlight(h)}
+                  className="absolute right-1 top-1.5 z-[1] grid size-8 place-items-center rounded-full text-faint opacity-0 transition-opacity hover:bg-error/10 hover:text-error focus-visible:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              )}
+              <button onClick={() => onJumpHighlight(h)} className="flex w-full gap-3 rounded-sm py-2.5 pl-2 pr-9 text-left transition-colors hover:bg-hairline-soft">
                 <span className="w-[3px] shrink-0 self-stretch rounded-full" style={{ background: swatchOf(h.color) }} />
                 <span className="min-w-0 flex-1">
                   <span className="line-clamp-4 text-body-md text-ink">{h.text}</span>

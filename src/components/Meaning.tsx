@@ -39,7 +39,7 @@ export function sayWord(word: string) {
 export const webSearchUrl = (word: string) => `https://www.google.com/search?q=${encodeURIComponent(`define ${word}`)}`
 
 /** The meanings: grouped by part of speech, each with an example. */
-export function MeaningBody({ state }: { state: MeaningState }) {
+export function MeaningBody({ state, saved }: { state: MeaningState; /** Kept on the Words page. */ saved?: boolean }) {
   if (state.status === 'loading')
     return (
       <div className="space-y-2 py-1" aria-label="Looking it up">
@@ -49,8 +49,13 @@ export function MeaningBody({ state }: { state: MeaningState }) {
       </div>
     )
   if (state.status === 'missing') return <p className="text-body-md text-body">No dictionary entry for “{state.word}”.</p>
-  if (state.status === 'offline') return <p className="text-body-md text-body">You’re offline. Meanings need the internet the first time; words you’ve looked up before work offline.</p>
-  if (state.status === 'error') return <p className="text-body-md text-body">Couldn’t reach the dictionary just now. Try again in a moment.</p>
+  if (state.status === 'offline' || state.status === 'error')
+    return (
+      <p className="text-body-md text-body">
+        {state.status === 'offline' ? 'You’re offline, and this word hasn’t been looked up on this device before.' : 'Couldn’t reach the dictionary just now.'}
+        {saved ? ' It’s saved in Words — its meaning will be there once you’re back online.' : ' Try again when you’re online.'}
+      </p>
+    )
   return (
     <>
       {state.meaning.groups.map((g, i) => (

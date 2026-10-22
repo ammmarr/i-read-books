@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
@@ -9,7 +9,7 @@ import { Button } from '../components/ui/Button'
 import { Segmented } from '../components/ui/Segmented'
 import { useToast } from '../components/ui/Toast'
 import { canSpeak, MeaningBody, sayWord, useMeaning, webSearchUrl } from '../components/Meaning'
-import { groupLookups, type WordEntry } from '../lib/words'
+import { fillMissingMeanings, groupLookups, type WordEntry } from '../lib/words'
 import { pluralize, relativeTime } from '../lib/format'
 import type { OpenAt } from '../reader/Reader'
 
@@ -23,6 +23,7 @@ export default function Words() {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
   const [open, setOpen] = useState<string | null>(null)
+  useEffect(() => void fillMissingMeanings(), [])
 
   const titles = useMemo(() => new Map((books ?? []).map((b: Book) => [b.id, b.title])), [books])
   const entries = useMemo(() => groupLookups(lookups ?? []), [lookups])
@@ -133,7 +134,11 @@ function WordRow({ entry: e, titles, open, onToggle, onRemove }: { entry: WordEn
             <span className="text-body-lg font-semibold text-ink">{e.word}</span>
             {e.count > 1 && <span className="text-body-sm tabular text-faint">{e.count}×</span>}
           </div>
-          {e.gist && <p className={`text-body-sm text-mute ${open ? '' : 'line-clamp-1'}`}>{e.gist}</p>}
+          {e.gist ? (
+            <p className={`text-body-sm text-mute ${open ? '' : 'line-clamp-1'}`}>{e.gist}</p>
+          ) : (
+            <p className="text-body-sm italic text-faint">{e.gist === '' ? 'No dictionary entry' : 'Looked up offline — the meaning comes when you’re online'}</p>
+          )}
           <p className="mt-0.5 text-body-sm text-faint">
             {book ? `${book} · p. ${e.latest.page + 1}` : 'A removed book'}
             {otherBooks > 0 && ` · and ${pluralize(otherBooks, 'other book')}`} · {relativeTime(e.lastAt)}

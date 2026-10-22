@@ -7,6 +7,7 @@ import { startSync } from './lib/sync'
 import { initNative, isNative } from './lib/native'
 import { enrichFromOpenLibrary } from './lib/readingList'
 import { initUpdates } from './lib/update'
+import { fillMissingMeanings } from './lib/words'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -30,3 +31,7 @@ setTimeout(() => void enrichFromOpenLibrary(), 3000)
 
 if (isNative) void initNative()
 initUpdates()
+
+// Words looked up offline get their meaning once there's internet.
+setTimeout(() => void fillMissingMeanings(), 4000)
+window.addEventListener('online', () => void fillMissingMeanings())
