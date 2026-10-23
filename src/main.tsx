@@ -4,6 +4,7 @@ import './index.css'
 import App from './App'
 import './lib/install'
 import { startSync } from './lib/sync'
+import { startAigpSync } from './lib/aigp'
 import { initNative, isNative } from './lib/native'
 import { enrichFromOpenLibrary } from './lib/readingList'
 import { initUpdates } from './lib/update'
@@ -26,6 +27,7 @@ if (boot) {
 }
 
 startSync()
+startAigpSync()
 // Fill in covers for reading-list books added while offline.
 setTimeout(() => void enrichFromOpenLibrary(), 3000)
 
