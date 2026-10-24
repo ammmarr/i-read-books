@@ -1,102 +1,73 @@
-import { Download, ExternalLink, Minus, Newspaper, Plus } from 'lucide-react'
+import { BookOpen, Download, Minus, Plus } from 'lucide-react'
 import { motion } from 'motion/react'
-import type { WebRead } from '../db/db'
-import { updateSettings, useSettings } from '../lib/settings'
-import { useWebReads, webDays, webSeconds, webToday } from '../lib/web'
-import { addDays, startOfDay } from '../lib/stats'
-import { formatDuration, formatDurationLong, relativeTime } from '../lib/format'
-import { BarChart } from './charts/BarChart'
-import { ProgressBar } from './ui/Progress'
+import { goalsOf, updateSettings, useSettings } from '../lib/settings'
+import { useWebReads } from '../lib/web'
+import { relativeTime } from '../lib/format'
 import { isNative } from '../lib/native'
 import { useExtension } from '../lib/share'
 import { SubstackMark, XMark } from './ShareQuote'
 
 /**
- * Substack reading, counted by the Chrome extension (extension/) — its own
- * daily goal, apart from the books one.
+ * Settings → Daily goals: books and Substack each have a goal; the overall
+ * goal is simply the two together.
  */
-
-/** "Substack · 12 of 30 min" — under the books goal on the Library's Today card. */
-export function SubstackTodayLine() {
-  const reads = useWebReads()
-  const { substackGoalMinutes: goal } = useSettings()
-  if (!reads?.length) return null
-  const m = Math.floor(webToday(reads) / 60)
+export function DailyGoals() {
+  const s = useSettings()
+  const g = goalsOf(s)
   return (
-    <p className="mt-1 flex items-center gap-1.5 text-body-sm text-mute">
-      <Newspaper className={`size-3.5 ${m >= goal ? 'text-success' : 'text-faint'}`} />
-      Substack · {m} of {goal} min
-    </p>
-  )
-}
-
-/** Insights: today against the goal, the last two weeks, and what you read. */
-export function SubstackInsights() {
-  const reads = useWebReads()
-  const { substackGoalMinutes: goal } = useSettings()
-  if (!reads?.length) return null
-  const today = webToday(reads)
-  const week = webSeconds(reads, addDays(startOfDay(Date.now()), -6))
-  const met = today >= goal * 60
-  return (
-    <motion.section
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-      className="mt-4 rounded-md border border-hairline bg-canvas-elevated p-5 sm:p-6"
-    >
-      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-heading-md text-ink">
-            <Newspaper className="size-5 text-mute" /> Substack
-          </h2>
-          <p className="text-body-md text-mute">Ideas and general knowledge — counted in Chrome by the I read extension.</p>
-        </div>
-        <div className="flex gap-6 text-right">
-          <div>
-            <div className="text-mono-eyebrow text-mute">Today</div>
-            <div className={`mt-1 text-heading-md tabular ${met ? 'text-success' : 'text-ink'}`}>
-              {Math.floor(today / 60)}
-              <span className="text-body-md text-mute"> / {goal} min</span>
-            </div>
-          </div>
-          <div>
-            <div className="text-mono-eyebrow text-mute">7 days</div>
-            <div className="mt-1 text-heading-md tabular text-ink">{formatDuration(week, { short: true })}</div>
-          </div>
-        </div>
+    <div>
+      <div className="flex items-baseline gap-2">
+        <motion.span key={g.overall} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
+          {g.overall}
+        </motion.span>
+        <span className="text-body-md text-mute">min a day overall</span>
       </div>
-      <ProgressBar value={today / (goal * 60)} thin color={met ? 'var(--color-success)' : 'var(--color-link)'} className="mb-6" />
-      <BarChart
-        ariaLabel="Substack minutes per day, last 14 days"
-        height={170}
-        data={webDays(reads, 14)}
-        format={(m) => formatDurationLong(m * 60)}
-        tick={(m) => `${Math.round(m)}m`}
-        goal={{ value: goal, label: `Goal ${goal}m` }}
-      />
-      <h3 className="mb-2 mt-6 text-label-sm text-ink">Recently read</h3>
-      <ul className="-mx-2">
-        {reads.slice(0, 8).map((r) => (
-          <ReadRow key={r.id} r={r} />
-        ))}
-      </ul>
-    </motion.section>
+      <p className="mt-1 text-body-sm text-mute">Books and Substack together — set each below.</p>
+      <div className="mt-5 divide-y divide-hairline rounded-md border border-hairline">
+        <GoalRow
+          icon={<BookOpen className="size-4" />}
+          tone="var(--color-link)"
+          label="Books"
+          value={g.books}
+          min={5}
+          onChange={(m) => updateSettings({ dailyGoalMinutes: m })}
+        />
+        <GoalRow
+          icon={<SubstackMark className="size-3.5" />}
+          tone="var(--color-substack)"
+          label="Substack"
+          hint={g.substack === 0 ? 'No Substack goal' : undefined}
+          value={g.substack}
+          min={0}
+          onChange={(m) => updateSettings({ substackGoalMinutes: m })}
+        />
+      </div>
+    </div>
   )
 }
 
-function ReadRow({ r }: { r: WebRead }) {
+function GoalRow({ icon, tone, label, hint, value, min, onChange }: { icon: React.ReactNode; tone: string; label: string; hint?: string; value: number; min: number; onChange: (m: number) => void }) {
+  const set = (m: number) => onChange(Math.max(min, Math.min(240, m)))
   return (
-    <li>
-      <a href={r.url} target="_blank" rel="noopener noreferrer" className="group flex items-baseline gap-3 rounded-sm px-2 py-2 transition-colors hover:bg-hairline-soft">
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-body-md text-ink group-hover:underline">{r.title || r.url}</span>
-          <span className="block truncate text-body-sm text-mute">{[r.publication, r.author, relativeTime(r.start)].filter(Boolean).join(' · ')}</span>
-        </span>
-        <span className="shrink-0 text-body-sm tabular text-body">{r.seconds < 60 ? `${r.seconds}s` : `${Math.round(r.seconds / 60)} min`}</span>
-        <ExternalLink className="size-3.5 shrink-0 self-center text-faint" />
-      </a>
-    </li>
+    <div className="flex items-center gap-3 px-4 py-3">
+      <span className="grid size-8 shrink-0 place-items-center rounded-full text-white" style={{ background: tone }}>
+        {icon}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="text-body-md text-ink">{label}</div>
+        {hint && <div className="text-body-sm text-mute">{hint}</div>}
+      </div>
+      <button onClick={() => set(value - 5)} disabled={value <= min} aria-label={`Less ${label.toLowerCase()}`} className="grid size-8 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft disabled:opacity-40">
+        <Minus className="size-3.5" />
+      </button>
+      <div className="w-[72px] text-center">
+        <span className="text-heading-md tabular text-ink">{value}</span>
+        <span className="ml-1 text-body-sm text-mute">min</span>
+      </div>
+      <button onClick={() => set(value + 5)} aria-label={`More ${label.toLowerCase()}`} className="grid size-8 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft">
+        <Plus className="size-3.5" />
+      </button>
+    </div>
   )
 }
 
@@ -140,30 +111,13 @@ export function SharingSettings() {
   )
 }
 
-/** Settings: the Substack goal, the extension to download, and whether it's reporting. */
+/** Settings → Substack: the extension to download, and whether it's reporting. */
 export function SubstackSettings() {
-  const { substackGoalMinutes: goal } = useSettings()
   const reads = useWebReads()
   const last = reads?.[0]
-  const setGoal = (m: number) => updateSettings({ substackGoalMinutes: Math.max(5, Math.min(240, m)) })
   return (
     <div>
-      <div className="flex items-center gap-4">
-        <button onClick={() => setGoal(goal - 5)} aria-label="Less" className="grid size-10 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft">
-          <Minus className="size-4" />
-        </button>
-        <div className="min-w-[120px] text-center">
-          <motion.span key={goal} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
-            {goal}
-          </motion.span>
-          <span className="ml-1 text-body-md text-mute">min / day</span>
-        </div>
-        <button onClick={() => setGoal(goal + 5)} aria-label="More" className="grid size-10 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft">
-          <Plus className="size-4" />
-        </button>
-      </div>
-
-      <div className="mt-6 rounded-md border border-hairline p-4">
+      <div className="rounded-md border border-hairline p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-body-md text-ink">Chrome extension</div>

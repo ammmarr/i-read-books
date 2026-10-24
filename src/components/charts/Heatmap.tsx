@@ -7,7 +7,8 @@ const LEFT = 30
 const TOP = 18
 
 /** Year-at-a-glance calendar. Colour is a one-hue sequential ramp anchored to the daily goal. */
-export function Heatmap({ cols }: { cols: HeatCell[][] }) {
+export function Heatmap({ cols, tone = 'books' }: { cols: HeatCell[][]; /** Blue, or Substack's orange. */ tone?: 'books' | 'substack' }) {
+  const fill = (level: number) => (tone === 'substack' && level > 0 ? `var(--color-seqs-${level})` : `var(--color-seq-${level})`)
   const wrap = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
   const [tip, setTip] = useState<{ cell: HeatCell; x: number; y: number } | null>(null)
@@ -65,7 +66,7 @@ export function Heatmap({ cols }: { cols: HeatCell[][] }) {
                   width={cell}
                   height={cell}
                   rx={3}
-                  fill={`var(--color-seq-${c.level})`}
+                  fill={fill(c.level)}
                   className="heat-cell"
                   style={{ animationDelay: `${ci * 12}ms` }}
                   onMouseEnter={(e) => {
@@ -96,7 +97,7 @@ export function Heatmap({ cols }: { cols: HeatCell[][] }) {
       <div className="mt-3 flex items-center justify-end gap-1.5 text-body-sm text-mute">
         <span>Less</span>
         {[0, 1, 2, 3, 4].map((l) => (
-          <span key={l} className="size-[11px] rounded-[3px]" style={{ background: `var(--color-seq-${l})` }} />
+          <span key={l} className="size-[11px] rounded-[3px]" style={{ background: fill(l) }} />
         ))}
         <span>More</span>
       </div>

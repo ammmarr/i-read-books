@@ -5,8 +5,9 @@ import { AnimatePresence, motion } from 'motion/react'
 import { ArrowDownUp, BookOpen, ChevronsRight, FilePlus, Flame, Plus, Search, X } from 'lucide-react'
 import { unreadAhead } from '../lib/pages'
 import { continueFrom } from '../lib/openBook'
-import { SubstackTodayLine } from '../components/SubstackTime'
-import { db, type Book, type BookStatus } from '../db/db'
+import { SubstackMark } from '../components/ShareQuote'
+import { SubstackContinueCard, SubstackShelf } from './LibrarySubstack'
+import { db, type Book, type BookStatus, type Session, type WebRead } from '../db/db'
 import { bookProgress } from '../db/books'
 import { PageContainer } from '../components/AppShell'
 import { BookCover } from '../components/BookCover'
@@ -14,15 +15,17 @@ import { BookMenu } from '../components/BookActions'
 import { useImporter } from '../components/Importer'
 import { Button } from '../components/ui/Button'
 import { Menu } from '../components/ui/Menu'
-import { ProgressBar, ProgressRing } from '../components/ui/Progress'
+import { ProgressBar } from '../components/ui/Progress'
 import { Segmented } from '../components/ui/Segmented'
-import { useSettings } from '../lib/settings'
+import { goalsOf, useSettings } from '../lib/settings'
+import { useWebReads, webSessions, webToday } from '../lib/web'
 import { bookStats, dailyTotals, streaks, summarize, todaySeconds } from '../lib/stats'
 import { formatDurationLong, greeting, pluralize } from '../lib/format'
 import { useIsTouch } from '../lib/hooks'
 import { useAuth } from '../lib/supabase'
 
 type Filter = 'all' | BookStatus
+type View = 'books' | 'substack'
 type Sort = 'recent' | 'added' | 'title' | 'progress'
 
 const SORTS: { key: Sort; label: string }[] = [
@@ -35,6 +38,23 @@ const SORTS: { key: Sort; label: string }[] = [
 export default function Library() {
   const books = useLiveQuery(() => db.books.toArray(), [])
   const sessions = useLiveQuery(() => db.sessions.toArray(), [])
+  const reads = useWebReads()
+  const [view, setViewState] = useState<View>(() => {
+    try {
+      return (localStorage.getItem('irb-library-view') as View) || 'books'
+    } catch {
+      return 'books'
+    }
+  })
+  const setView = (v: View) => {
+    setViewState(v)
+    try {
+      localStorage.setItem('irb-library-view', v)
+    } catch {
+      /* ignore */
+    }
+  }
+  const [pub, setPub] = useState<string | null>(null)
   const { pick } = useImporter()
   const { name } = useAuth()
   const [filter, setFilter] = useState<Filter>('all')
@@ -65,22 +85,45 @@ export default function Library() {
       })
   }, [books, filter, sort, query])
 
-  if (!books) return <LibrarySkeleton />
-  if (books.length === 0) return <EmptyLibrary onAdd={pick} />
+  if (!books || !reads) return <LibrarySkeleton />
+  if (books.length === 0 && reads.length === 0) return <EmptyLibrary onAdd={pick} />
 
   const count = (s: BookStatus) => books.filter((b) => b.status === s).length
 
   return (
     <PageContainer>
-      <div className="mb-2 text-mono-eyebrow text-mute">
-        {greeting()}
-        {name ? `, ${name.split(' ')[0]}` : ''} · {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <div className="text-mono-eyebrow text-mute">
+          {greeting()}
+          {name ? `, ${name.split(' ')[0]}` : ''} · {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+        </div>
+        <Segmented<View>
+          size="sm"
+          value={view}
+          onChange={setView}
+          ariaLabel="Books or Substack"
+          options={[
+            { value: 'books', label: <span className="inline-flex items-center gap-1.5"><BookOpen className="size-3.5" /> Books</span> },
+            { value: 'substack', label: <span className="inline-flex items-center gap-1.5"><SubstackMark className="size-3 text-[var(--color-substack)]" /> Substack</span> },
+          ]}
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-        {current ? <ContinueCard book={current} sessions={sessions ?? []} /> : <PickSomething books={books} />}
-        <TodayCard sessions={sessions ?? []} />
+        {view === 'substack' ? (
+          <SubstackContinueCard reads={reads} onPick={setPub} />
+        ) : current ? (
+          <ContinueCard book={current} sessions={sessions ?? []} />
+        ) : (
+          <PickSomething books={books} />
+        )}
+        <TodayCard sessions={sessions ?? []} reads={reads} />
       </div>
+
+      {view === 'substack' ? (
+        <SubstackShelf reads={reads} pub={pub} setPub={setPub} />
+      ) : (
+      <>
 
       <div className="mt-10 flex flex-wrap items-center gap-3">
         <h2 className="mr-auto text-heading-md text-ink">Your shelf</h2>
@@ -145,6 +188,8 @@ export default function Library() {
           <p className="mt-1 text-body-md text-mute">{query ? 'Try a different title or author.' : 'Books you move to this shelf will show up here.'}</p>
         </motion.div>
       )}
+      </>
+      )}
     </PageContainer>
   )
 }
@@ -200,7 +245,7 @@ function BookCard({ book, index }: { book: Book; index: number }) {
   )
 }
 
-function ContinueCard({ book, sessions }: { book: Book; sessions: import('../db/db').Session[] }) {
+function ContinueCard({ book, sessions }: { book: Book; sessions: Session[] }) {
   const navigate = useNavigate()
   const overall = summarize(sessions, 0, Infinity).pagesPerHour
   const stats = bookStats(book, sessions, overall)
@@ -284,13 +329,20 @@ function PickSomething({ books }: { books: Book[] }) {
   )
 }
 
-function TodayCard({ sessions }: { sessions: import('../db/db').Session[] }) {
-  const { dailyGoalMinutes } = useSettings()
-  const today = todaySeconds(sessions)
-  const goal = dailyGoalMinutes * 60
-  const pct = goal ? today / goal : 0
-  const s = streaks(dailyTotals(sessions))
-  const met = pct >= 1
+/**
+ * Today against your goals: the ring is the overall goal (books + Substack),
+ * filled in each one's colour; below, each goal on its own.
+ */
+function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
+  const g = goalsOf(useSettings())
+  const books = todaySeconds(sessions)
+  const substack = webToday(reads)
+  const total = books + substack
+  const goal = g.overall * 60
+  const met = goal > 0 && total >= goal
+  // Any reading keeps the streak going — books or Substack.
+  const s = streaks(dailyTotals([...sessions, ...webSessions(reads)]))
+  const showSubstack = g.substack > 0 || reads.length > 0
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -298,26 +350,84 @@ function TodayCard({ sessions }: { sessions: import('../db/db').Session[] }) {
       transition={{ duration: 0.5, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
     >
       <Link to="/stats" className="flex h-full items-center gap-5 rounded-md border border-hairline bg-canvas-elevated p-5 transition-colors hover:border-faint/40 sm:p-6 lg:flex-col lg:items-start lg:justify-between">
-        <ProgressRing value={pct} size={88} stroke={6} color={met ? 'var(--color-success)' : 'var(--color-link)'} label="Daily goal">
+        <GoalRing books={goal ? books / goal : 0} substack={goal ? substack / goal : 0} met={met}>
           <div className="text-center leading-none">
-            <div className="text-[20px] font-semibold tracking-tight text-ink">{Math.floor(today / 60)}</div>
-            <div className="mt-1 text-[11px] text-mute">of {dailyGoalMinutes}m</div>
+            <div className={`text-[20px] font-semibold tracking-tight ${met ? 'text-success' : 'text-ink'}`}>{Math.floor(total / 60)}</div>
+            <div className="mt-1 text-[11px] text-mute">of {g.overall}m</div>
           </div>
-        </ProgressRing>
-        <div className="min-w-0">
+        </GoalRing>
+        <div className="min-w-0 flex-1 lg:w-full lg:flex-none">
           <div className="text-mono-eyebrow text-mute">Today</div>
           <p className="mt-2 text-label-sm text-ink">
-            {met ? 'Daily goal reached — nice.' : today > 0 ? `${Math.max(1, Math.ceil((goal - today) / 60))} min to your goal` : 'No reading yet today'}
+            {met ? 'Daily goal reached — nice.' : total > 0 ? `${Math.max(1, Math.ceil((goal - total) / 60))} min to your goal` : 'No reading yet today'}
           </p>
-          <p className="mt-1 flex items-center gap-1.5 text-body-sm text-mute">
+          <div className="mt-3 space-y-2.5">
+            <GoalLine label="Books" seconds={books} goal={g.books * 60} color="var(--color-link)" />
+            {showSubstack && <GoalLine label="Substack" seconds={substack} goal={g.substack * 60} color="var(--color-substack)" />}
+          </div>
+          <p className="mt-3 flex items-center gap-1.5 text-body-sm text-mute">
             <Flame className={`size-3.5 ${s.readToday ? 'text-warning' : 'text-faint'}`} />
             {s.current > 0 ? `${s.current}-day streak` : 'Start a streak today'}
             {s.longest > s.current && ` · best ${s.longest}`}
           </p>
-          <SubstackTodayLine />
         </div>
       </Link>
     </motion.div>
+  )
+}
+
+/** One goal's progress: "Books  35 / 60 min" over a thin bar in its colour. */
+function GoalLine({ label, seconds, goal, color }: { label: string; seconds: number; goal: number; color: string }) {
+  const m = Math.floor(seconds / 60)
+  const done = goal > 0 && seconds >= goal
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-3 text-body-sm">
+        <span className="flex items-center gap-1.5 text-body">
+          <span className="size-2 rounded-full" style={{ background: color }} />
+          {label}
+        </span>
+        <span className="tabular text-mute">
+          <span className={done ? 'font-medium text-success' : 'text-ink'}>{m}</span>
+          {goal > 0 ? ` / ${Math.round(goal / 60)} min` : ' min'}
+        </span>
+      </div>
+      {goal > 0 && <ProgressBar value={seconds / goal} thin color={done ? 'var(--color-success)' : color} className="mt-1" />}
+    </div>
+  )
+}
+
+/** The overall goal as a ring: books' share then Substack's, each in its colour. */
+function GoalRing({ books, substack, met, children }: { books: number; substack: number; met: boolean; children: React.ReactNode }) {
+  const size = 88, stroke = 6
+  const r = (size - stroke) / 2
+  const c = 2 * Math.PI * r
+  const b = Math.min(1, Math.max(0, books))
+  const s = Math.min(1 - b, Math.max(0, substack))
+  return (
+    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }} role="img" aria-label={`Daily goal: ${Math.round((b + s) * 100)}%`}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-hairline)" strokeWidth={stroke} />
+        {b > 0 && (
+          <motion.circle
+            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={met ? 'var(--color-success)' : 'var(--color-link)'} strokeWidth={stroke} strokeLinecap="round"
+            initial={{ strokeDasharray: `0 ${c}` }}
+            animate={{ strokeDasharray: `${Math.max(0, b * c - (s > 0 ? 2 : 0))} ${c}` }}
+            transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
+          />
+        )}
+        {s > 0 && (
+          <motion.circle
+            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={met ? 'var(--color-success)' : 'var(--color-substack)'} strokeWidth={stroke} strokeLinecap="round"
+            strokeDashoffset={-b * c}
+            initial={{ strokeDasharray: `0 ${c}` }}
+            animate={{ strokeDasharray: `${s * c} ${c}` }}
+            transition={{ duration: 0.9, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+          />
+        )}
+      </svg>
+      <div className="absolute inset-0 grid place-items-center">{children}</div>
+    </div>
   )
 }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
-import { Download, HardDrive, ListPlus, MonitorSmartphone, Minus, Plus, ShieldCheck, Upload } from 'lucide-react'
+import { Download, HardDrive, ListPlus, MonitorSmartphone, ShieldCheck, Upload } from 'lucide-react'
 import { PageContainer, PageHeader } from '../components/AppShell'
 import { Button } from '../components/ui/Button'
 import { Segmented } from '../components/ui/Segmented'
@@ -13,15 +13,13 @@ import { isStandalone, useInstallPrompt } from '../lib/install'
 import { formatBytes } from '../lib/format'
 import { AccountSync } from '../components/AccountSync'
 import { AigpSettings } from '../components/AigpSettings'
-import { SharingSettings, SubstackSettings } from '../components/SubstackTime'
+import { DailyGoals, SharingSettings, SubstackSettings } from '../components/SubstackTime'
 import { useImporter } from '../components/Importer'
 import { cloudEnabled } from '../lib/supabase'
 import { setRecapsEnabled, setSectionRecaps, useRecapPrefs } from '../lib/recaps'
 import { applyUpdate, checkForUpdate, useUpdate, versionLabel } from '../lib/update'
 import { Logo } from '../components/Logo'
 import { NightShiftSettings } from '../components/NightShift'
-
-const GOALS = [10, 15, 20, 30, 45, 60]
 
 export default function SettingsPage() {
   const s = useSettings()
@@ -41,8 +39,6 @@ export default function SettingsPage() {
     refreshStorage()
   }, [])
 
-  const setGoal = (m: number) => updateSettings({ dailyGoalMinutes: Math.max(5, Math.min(240, m)) })
-
   return (
     <PageContainer className="max-w-[720px]">
       <PageHeader eyebrow="Preferences" title="Settings" />
@@ -53,35 +49,11 @@ export default function SettingsPage() {
         </Group>
       )}
 
-      <Group title="Daily goal" desc="A small, steady target builds the habit. Your streak counts any day with at least a minute of reading.">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setGoal(s.dailyGoalMinutes - 5)} aria-label="Less" className="grid size-10 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft">
-            <Minus className="size-4" />
-          </button>
-          <div className="min-w-[120px] text-center">
-            <motion.span key={s.dailyGoalMinutes} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
-              {s.dailyGoalMinutes}
-            </motion.span>
-            <span className="ml-1 text-body-md text-mute">min / day</span>
-          </div>
-          <button onClick={() => setGoal(s.dailyGoalMinutes + 5)} aria-label="More" className="grid size-10 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft">
-            <Plus className="size-4" />
-          </button>
-        </div>
-        <div className="mt-4 flex flex-wrap gap-2">
-          {GOALS.map((g) => (
-            <button
-              key={g}
-              onClick={() => setGoal(g)}
-              className={`h-8 rounded-full border px-3 text-body-sm font-medium transition-colors ${s.dailyGoalMinutes === g ? 'border-ink bg-ink text-canvas' : 'border-hairline text-body hover:bg-hairline-soft'}`}
-            >
-              {g} min
-            </button>
-          ))}
-        </div>
+      <Group title="Daily goals" desc="Your overall goal is your books and Substack goals together; each also shows its own progress. Your streak counts any day with at least a minute of reading — books or Substack.">
+        <DailyGoals />
       </Group>
 
-      <Group title="Substack" desc="Its own daily goal for reading ideas and general knowledge on Substack, apart from your books. A small Chrome extension counts the time and adds it here.">
+      <Group title="Substack" desc="A small Chrome extension counts the time you actively read on Substack and adds it here — toward your Substack goal.">
         <SubstackSettings />
       </Group>
 

@@ -780,7 +780,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     goalSeconds: settings.dailyGoalMinutes * 60,
     onGoalReached: () => {
       vibrate(20)
-      toast({ message: <span className="inline-flex items-center gap-1.5"><Trophy className="size-4 text-warning" /> Daily goal reached</span>, description: `${settings.dailyGoalMinutes} minutes today. Keep the streak going.`, duration: 5000 })
+      toast({ message: <span className="inline-flex items-center gap-1.5"><Trophy className="size-4 text-warning" /> Books goal reached</span>, description: `${settings.dailyGoalMinutes} minutes of books today. Keep the streak going.`, duration: 5000 })
     },
   })
 

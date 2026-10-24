@@ -15,6 +15,7 @@ import {
 import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "../db/db";
 import { dailyTotals, streaks } from "../lib/stats";
+import { webSessions } from "../lib/web";
 import { setTheme, useIsDark } from "../lib/theme";
 import { useImporter } from "./Importer";
 import { SyncIndicator } from "./AccountSync";
@@ -69,7 +70,8 @@ export function ThemeToggle() {
 
 function StreakChip() {
   const s = useLiveQuery(
-    async () => streaks(dailyTotals(await db.sessions.toArray())),
+    // Any reading keeps the streak going — books or Substack.
+    async () => streaks(dailyTotals([...(await db.sessions.toArray()), ...webSessions(await db.webReads.toArray())])),
     [],
   );
   if (!s || s.current === 0) return null;

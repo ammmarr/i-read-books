@@ -8,6 +8,8 @@ export interface BarDatum {
   value: number
   detail?: string
   isCurrent?: boolean
+  /** Stacked from the bottom (e.g. books, then Substack); they add up to `value`. */
+  parts?: { label: string; value: number; color: string }[]
 }
 
 interface Props {
@@ -20,6 +22,8 @@ interface Props {
   ariaLabel: string
   /** Show every Nth x label (auto if omitted). */
   labelEvery?: number
+  /** Bar colour for a single series (default: the link blue). */
+  color?: string
 }
 
 function niceMax(v: number) {
@@ -33,10 +37,11 @@ function niceMax(v: number) {
 const M = { top: 12, right: 8, bottom: 26, left: 40 }
 
 /**
- * Single-series column chart. Thin columns (≤24px) with a 4px rounded data
- * end and a square baseline; hairline solid gridlines; hover tooltip per column.
+ * Column chart — one series, or stacked parts. Thin columns (≤24px) with a
+ * 4px rounded data end and a square baseline; hairline solid gridlines; hover
+ * tooltip per column.
  */
-export function BarChart({ data, format, tick = format, height = 220, goal, ariaLabel, labelEvery }: Props) {
+export function BarChart({ data, format, tick = format, height = 220, goal, ariaLabel, labelEvery, color = 'var(--color-link)' }: Props) {
   const wrap = useRef<HTMLDivElement>(null)
   const [w, setW] = useState(0)
   const [hover, setHover] = useState<number | null>(null)
@@ -61,10 +66,10 @@ export function BarChart({ data, format, tick = format, height = 220, goal, aria
   const y = (v: number) => innerH - (v / max) * innerH
   const every = labelEvery ?? Math.max(1, Math.ceil(n / Math.max(1, Math.floor(innerW / 44))))
 
-  const barPath = (x: number, h: number) => {
-    const r = Math.min(4, barW / 2, h)
-    const b = innerH
-    const t = innerH - h
+  const barPath = (x: number, h: number, base = 0, round = true) => {
+    const r = round ? Math.min(4, barW / 2, h) : 0
+    const b = innerH - base
+    const t = innerH - base - h
     return `M${x},${b} L${x},${t + r} Q${x},${t} ${x + r},${t} L${x + barW - r},${t} Q${x + barW},${t} ${x + barW},${t + r} L${x + barW},${b} Z`
   }
 
@@ -90,10 +95,30 @@ export function BarChart({ data, format, tick = format, height = 220, goal, aria
               const dim = hover != null && hover !== i
               return (
                 <g key={d.key}>
-                  {d.value > 0 ? (
+                  {d.value > 0 && d.parts?.length ? (
+                    <motion.g
+                      initial={{ scaleY: 0 }}
+                      animate={{ scaleY: 1, opacity: dim ? 0.35 : 1 }}
+                      transition={{ scaleY: { delay: Math.min(i, 40) * 0.012, type: 'spring', stiffness: 260, damping: 26 }, opacity: { duration: 0.15 } }}
+                      style={{ transformOrigin: `0px ${innerH}px`, transformBox: 'view-box' }}
+                    >
+                      {(() => {
+                        // Bottom to top; only the top part gets the rounded end, with a hairline gap between.
+                        const shown = d.parts.filter((p) => p.value > 0)
+                        let base = 0
+                        return shown.map((p, k) => {
+                          const ph = Math.max((p.value / max) * innerH, 2)
+                          const top = k === shown.length - 1
+                          const el = <path key={p.label} d={barPath(x, top ? ph : Math.max(ph - 1, 1), base, top)} fill={p.color} />
+                          base += ph
+                          return el
+                        })
+                      })()}
+                    </motion.g>
+                  ) : d.value > 0 ? (
                     <motion.path
                       d={barPath(x, Math.max(h, 2))}
-                      fill="var(--color-link)"
+                      fill={color}
                       initial={{ scaleY: 0 }}
                       animate={{ scaleY: 1, opacity: dim ? 0.35 : 1 }}
                       transition={{ scaleY: { delay: Math.min(i, 40) * 0.012, type: 'spring', stiffness: 260, damping: 26 }, opacity: { duration: 0.15 } }}
@@ -153,9 +178,15 @@ export function BarChart({ data, format, tick = format, height = 220, goal, aria
           >
             <div className="text-body-sm text-mute">{hd.title}</div>
             <div className="mt-0.5 flex items-center gap-1.5 text-label-sm text-ink">
-              <span className="size-2 rounded-full bg-link" />
+              {!hd.parts?.length && <span className="size-2 rounded-full" style={{ background: color }} />}
               {format(hd.value)}
             </div>
+            {hd.parts?.map((p) => (
+              <div key={p.label} className="mt-0.5 flex items-center gap-1.5 text-body-sm text-body">
+                <span className="size-2 rounded-full" style={{ background: p.color }} />
+                {p.label} · {format(p.value)}
+              </div>
+            ))}
             {hd.detail && <div className="mt-0.5 text-body-sm text-body">{hd.detail}</div>}
           </motion.div>
         )}

@@ -22,6 +22,8 @@
   --color-faint: #a1a1a1;
   --color-hairline: #ebebeb;
   --color-link: #0070f3;
+  /* Substack reading, next to books' blue in charts and goals */
+  --color-substack: #ff6719;
   --color-link-deep: #0761d1;
   --color-link-soft: #d3e5ff;
   --color-violet: #7928ca;
@@ -39,6 +41,11 @@
   --color-seq-2: #86b6ef;
   --color-seq-3: #3987e5;
   --color-seq-4: #1c5cab;
+  /* the same steps in Substack orange */
+  --color-seqs-1: #fde0cc;
+  --color-seqs-2: #fbb185;
+  --color-seqs-3: #f57d3a;
+  --color-seqs-4: #c4520f;
 
   --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
@@ -77,6 +84,7 @@
   --color-faint: #707070;
   --color-hairline: #2e2e2e;
   --color-link: #3291ff;
+  --color-substack: #ff7a33;
   --color-link-deep: #0070f3;
   --color-link-soft: #0f2d52;
   --color-violet: #8a63d2;
@@ -89,6 +97,10 @@
   --color-seq-2: #1c5cab;
   --color-seq-3: #3987e5;
   --color-seq-4: #9ec5f4;
+  --color-seqs-1: #6b2a08;
+  --color-seqs-2: #a8450f;
+  --color-seqs-3: #f57d3a;
+  --color-seqs-4: #fbb185;
 
   --shadow-whisper: 0 1px 1px rgba(0, 0, 0, 0.4);
   --shadow-floating: 0 0 0 1px rgba(255, 255, 255, 0.06), 0 8px 16px -4px rgba(0, 0, 0, 0.5),

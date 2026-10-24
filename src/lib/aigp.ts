@@ -95,19 +95,22 @@ function localDay(ts: number) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
-/** Seconds read today, across every session on this device (synced ones included). */
+/** Seconds read today — books and Substack — across every session on this device (synced ones included). */
 async function todaySeconds() {
-  const sessions = await db.sessions.where('start').aboveOrEqual(startOfDay(Date.now())).toArray()
-  return sessions.reduce((sum, s) => sum + s.seconds, 0)
+  const from = startOfDay(Date.now())
+  const [sessions, reads] = await Promise.all([db.sessions.where('start').aboveOrEqual(from).toArray(), db.webReads.where('start').aboveOrEqual(from).toArray()])
+  return [...sessions, ...reads].reduce((sum, s) => sum + s.seconds, 0)
 }
 
-/** Minutes read on each local day (days with at least a minute), from every session on this device, synced ones included. */
+/** Minutes read on each local day — books and Substack — (days with at least a minute), from everything on this device, synced included. */
 async function minutesByDay() {
   const seconds = new Map<string, number>()
-  await db.sessions.each((s) => {
+  const add = (s: { start: number; seconds: number }) => {
     const day = localDay(s.start)
     seconds.set(day, (seconds.get(day) ?? 0) + s.seconds)
-  })
+  }
+  await db.sessions.each(add)
+  await db.webReads.each(add)
   return [...seconds]
     .map(([day, sec]) => ({ day, progress: Math.floor(sec / 60) }))
     .filter((d) => d.progress >= 1)
@@ -259,6 +262,13 @@ export function startAigpSync() {
     schedule()
   })
   db.sessions.hook('updating', () => {
+    schedule()
+  })
+  // Substack time (from the Chrome extension, arriving by sync) counts too.
+  db.webReads.hook('creating', () => {
+    schedule()
+  })
+  db.webReads.hook('updating', () => {
     schedule()
   })
   document.addEventListener('visibilitychange', () => {

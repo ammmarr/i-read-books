@@ -6,6 +6,7 @@ export type ZoomMode = 'auto' | 'width' | 'page' | 'custom'
 
 export interface Settings {
   theme: ThemePref
+  /** Daily minutes of books. (The overall goal is this plus Substack's — see goalsOf.) */
   dailyGoalMinutes: number
   pageTheme: PageTheme
   keepAwake: boolean
@@ -17,7 +18,7 @@ export interface Settings {
   recapSections: boolean
   /** Books where you said "don't ask" for recaps. */
   recapsOffBooks: string[]
-  /** Daily minutes on Substack (counted by the Chrome extension) — apart from the books goal. */
+  /** Daily minutes on Substack (counted by the Chrome extension); 0 = no Substack goal. */
   substackGoalMinutes: number
   /** Night Shift (warm screen) — this device only. See lib/nightShift.ts. */
   nightShift: 'off' | 'on' | 'scheduled'
@@ -46,6 +47,13 @@ const DEFAULTS: Settings = {
   nightShiftFrom: '21:00',
   nightShiftTo: '07:00',
   nightShiftOverride: null,
+}
+
+/** Your daily goals: books, Substack, and overall (their sum). */
+export function goalsOf(s: Pick<Settings, 'dailyGoalMinutes' | 'substackGoalMinutes'>) {
+  const books = s.dailyGoalMinutes
+  const substack = s.substackGoalMinutes
+  return { books, substack, overall: books + substack }
 }
 
 const KEY = 'irb-settings'

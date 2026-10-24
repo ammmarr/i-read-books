@@ -124,8 +124,9 @@ export function grainFor(range: RangeKey, start: number, now = Date.now()): Grai
   return 'month'
 }
 
-export function buckets(range: RangeKey, sessions: Session[], now = Date.now()): { grain: Grain; buckets: Bucket[] } {
-  const start = rangeStart(range, sessions, now)
+/** Reading per day/week/month over the range. Pass `from` to line up several series (books, Substack) on the same periods. */
+export function buckets(range: RangeKey, sessions: Session[], now = Date.now(), from?: number): { grain: Grain; buckets: Bucket[] } {
+  const start = from ?? rangeStart(range, sessions, now)
   const grain = grainFor(range, start, now)
   const daily = dailyTotals(sessions)
   const out: Bucket[] = []
