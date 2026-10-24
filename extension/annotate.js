@@ -4,8 +4,11 @@
 // Alt+Shift+H (⌥⇧H on a Mac) and I read's takes over until you press it again.
 // Highlights find their way back to the text by the quote and a little of
 // what's around it, and sync to I read (background.js → irb_web_annotations).
+// It also shows the reading clock's "Still reading?" and "Reading time paused".
 ;(() => {
   if (!globalThis.__irbSubstack || window.top !== window) return
+  /** The reading clock (content.js): "Still reading?" and paused. */
+  const R = globalThis.__irbReading
 
   const COLORS = [
     { key: 'yellow', swatch: '#fcd34d', mark: 'rgba(253, 224, 71, 0.55)', label: 'Yellow' },
@@ -219,8 +222,9 @@
   }
 
   async function refreshStatus() {
-    // Only on a post (not Substack's home feed, inbox, settings…).
-    host.style.display = bodyEl() ? '' : 'none'
+    // The pill only on a post (not Substack's home feed, inbox, settings…); "Still reading?" anywhere.
+    pill.hidden = !bodyEl()
+    if (pill.hidden) panel.classList.remove('open')
     const s = await send({ type: 'pageStatus', url: here() })
     if (s) status = s
     renderPill()
@@ -305,8 +309,33 @@
     .toast { position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 12px); opacity: 0; padding: 10px 14px; border-radius: 10px; background: #111; color: #fff;
       box-shadow: 0 10px 30px rgba(0,0,0,.25); transition: opacity .2s ease, transform .25s cubic-bezier(.16,1,.3,1); pointer-events: none; white-space: nowrap; }
     .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .still { position: fixed; left: 50%; top: 76px; width: min(400px, calc(100vw - 32px)); display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 16px;
+      border-radius: 12px; background: var(--bg); border: 1px solid var(--line); box-shadow: 0 18px 48px rgba(0,0,0,.18);
+      opacity: 0; transform: translate(-50%, -12px) scale(.97); pointer-events: none; transition: opacity .18s ease, transform .3s cubic-bezier(.16,1,.3,1); }
+    .still.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+    .still .ic { color: var(--link); flex: none; }
+    .still.paused .ic { color: var(--faint); }
+    .still .grow { flex: 1; min-width: 0; }
+    .still .st { font-weight: 600; }
+    .still .sd { font-size: 12px; color: var(--mute); }
+    .btn { height: 30px; padding: 0 12px; border-radius: 6px; background: var(--ink); color: var(--bg); font-size: 12.5px; font-weight: 500; white-space: nowrap; flex: none; }
+    .btn:hover { opacity: .88; }
+    .btn.outline { background: none; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+    .btn.outline:hover { opacity: 1; background: var(--soft); }
+    .still .x { width: 28px; height: 28px; border-radius: 999px; color: var(--faint); flex: none; font-size: 16px; }
+    .still .x:hover { background: var(--soft); color: var(--ink); }
+    .pill.asking .s { color: #7cb8ff; }
+    .pill.paused .ring { opacity: .45; }
+    .state { margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: var(--soft); color: var(--body); font-size: 12px; }
+    [hidden] { display: none !important; }
     svg { display: block; }
   </style>
+  <div class="still" role="alertdialog" aria-live="assertive" data-k="still">
+    <svg class="ic" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2h4"/><path d="M12 14l3-3"/><circle cx="12" cy="14" r="8"/></svg>
+    <div class="grow"><div class="st" data-k="stilltitle">Still reading?</div><div class="sd" data-k="stilltext"></div></div>
+    <button class="btn" data-k="stillbtn">I’m here</button>
+    <button class="x" data-k="stillx" aria-label="Dismiss">×</button>
+  </div>
   <div class="pill" part="pill" tabindex="0" aria-label="I read on this page">
     <svg class="ring" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10.5" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="3"/><circle class="arc" cx="13" cy="13" r="10.5" fill="none" stroke="#ff6719" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 66"/></svg>
     <span class="t">0 min</span><span class="s">this article</span>
@@ -322,6 +351,7 @@
       <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><span class="big" data-k="article">0</span><span class="muted">min read</span></div>
       <div style="display:flex;justify-content:space-between;margin-top:12px" class="muted"><span>Substack today</span><span data-k="today">0 of 30 min</span></div>
       <div class="bar" data-k="todaybar"><b></b></div>
+      <div class="state" data-k="state" hidden></div>
     </div>
     <div class="row">
       <div class="grow"><div>Highlight with I read</div><div class="muted" style="font-size:12px">instead of Substack’s pop-up · <kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>H</kbd></div></div>
@@ -354,9 +384,16 @@
   function renderPill() {
     const goal = status.goal || 0
     const frac = goal ? Math.min(1, status.todaySecs / (goal * 60)) : 0
+    const { asking, away } = R?.state() ?? {}
+    const paused = !!away && !away.back
     ui.querySelector('.arc').setAttribute('stroke-dasharray', `${(frac * 66).toFixed(1)} 66`)
     ui.querySelector('.arc').setAttribute('stroke', goal && status.todaySecs >= goal * 60 ? '#22c55e' : '#ff6719')
     pill.querySelector('.t').textContent = `${mins(status.articleSecs)} min`
+    pill.querySelector('.s').textContent = paused ? 'paused' : asking != null ? 'still reading?' : 'this article'
+    pill.classList.toggle('paused', paused)
+    pill.classList.toggle('asking', !paused && asking != null)
+    $('state').hidden = !paused
+    $('state').textContent = 'Reading time paused. It runs again when you scroll or move the mouse.'
     pill.classList.toggle('on', mode)
     $('article').textContent = String(mins(status.articleSecs))
     $('today').textContent = goal ? `${mins(status.todaySecs)} of ${goal} min` : `${mins(status.todaySecs)} min`
@@ -452,6 +489,40 @@
       $('saved').textContent = 'Saved'
     }, 600)
   })
+
+  // ── "Still reading?" and "Reading time paused" (content.js keeps the clock) ──
+  const dur = (s) => {
+    const m = Math.round(s / 60)
+    if (m < 1) return 'under a minute'
+    if (m < 60) return `${m} min`
+    const h = Math.floor(m / 60)
+    return m % 60 ? `${h} hr ${m % 60} min` : `${h} hr`
+  }
+  function renderStill() {
+    renderPill()
+    const { asking, away } = R?.state() ?? {}
+    const card = $('still')
+    card.classList.toggle('show', asking != null || !!away)
+    card.classList.toggle('paused', !!away)
+    if (asking == null && !away) return
+    card.setAttribute('aria-label', away ? 'Reading time paused' : 'Still reading?')
+    $('stilltitle').textContent = !away ? 'Still reading?' : away.back ? 'Welcome back' : 'Reading time paused'
+    $('stilltext').textContent = !away
+      ? `Your reading time pauses in ${asking} s.`
+      : away.off > 0
+        ? `${dur(away.off)} while you were away ${away.off < 90 ? 'wasn’t' : 'weren’t'} counted.`
+        : away.back
+          ? 'Your reading time is running again.'
+          : 'It runs again when you’re back.'
+    const btn = $('stillbtn')
+    btn.hidden = !!away && !(away.off > 0)
+    btn.textContent = away ? 'I was reading' : 'I’m here'
+    btn.classList.toggle('outline', !!away)
+    $('stillx').hidden = !away?.back
+  }
+  $('stillbtn').addEventListener('click', () => (R?.state().away ? R.countAway() : R?.stillHere()))
+  $('stillx').addEventListener('click', () => R?.dismiss())
+  R?.subscribe(renderStill)
 
   // ── I read's highlighting (instead of Substack's pop-up) ──────────────────
   let toastT

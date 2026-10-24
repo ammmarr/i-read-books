@@ -107,17 +107,25 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
     let backTimer: ReturnType<typeof setTimeout> | undefined
     const pageSecs = () => pageSecsRef.current?.(st.page) ?? DEFAULT_PAGE_S
 
-    const flush = async () => {
-      const s = st.session
-      if (!s) return
+    /** Still time past what the page takes to read: not yours until you show you're there (see goAway). */
+    const held = () => Math.max(0, st.stillCounted - Math.round(pageSecs()))
+
+    const write = async (s: Session, off: number) => {
       s.pages = [...st.pages]
-      if (s.seconds >= MIN_SESSION_S) await db.sessions.put({ ...s })
+      const seconds = s.seconds - off
+      if (seconds >= MIN_SESSION_S) await db.sessions.put({ ...s, seconds, end: s.end - off * 1000 })
+    }
+    // Saved as it goes, so nothing is lost if the tab is killed — but without the held still time, so a
+    // book left open never reaches your totals, your other devices or AIGP, even before "Still reading?".
+    const flush = async () => {
+      if (st.session) await write(st.session, held())
     }
 
     const end = async () => {
       const s = st.session
       if (!s) return
-      await flush()
+      // Ending is you (closing the book, coming back after a while): all of it counts.
+      await write(s, 0)
       if (s.seconds < MIN_SESSION_S) await db.sessions.delete(s.id)
       else st.todayBase += s.seconds
       st.session = null

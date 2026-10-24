@@ -8,6 +8,9 @@ import { startOfDay } from './stats'
  * minutes were read: today as you read, and every past day once on connecting and about once a day
  * after that, so the whole history is there, from any device.
  *
+ * The minutes are only time you were there for: a book or a Substack post left open is held back
+ * until you answer "Still reading?" (or move), and dropped if nobody does, so it never gets here.
+ *
  * The connection (address + key) is kept on this device only. It never goes through sync.
  */
 
@@ -183,13 +186,16 @@ export async function reportToAigp(force = false): Promise<AigpStatus | null> {
   const day = localDay(now)
   try {
     const minutes = Math.floor((await todaySeconds()) / 60)
-    if (minutes < 1 && !force) return null
-    if (!force && start.sent?.day === day && minutes <= start.sent.minutes) return null
+    // This device already told AIGP more today and the total has come down since (a Substack read
+    // removed, time put right): say so, or AIGP keeps the bigger number.
+    const lower = start.sent?.day === day && minutes < start.sent.minutes
+    if (minutes < 1 && !force && !lower) return null
+    if (!force && start.sent?.day === day && minutes === start.sent.minutes) return null
 
     const res = await fetch(`${start.url}/api/connect/event`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${start.key}` },
-      body: JSON.stringify({ progress: minutes, unit: 'minutes', day }),
+      body: JSON.stringify({ progress: minutes, unit: 'minutes', day, ...(lower ? { correct: true } : {}) }),
     })
     const body = (await res.json().catch(() => ({}))) as { done?: boolean; changed?: boolean; error?: string }
     const cur = read()
@@ -198,7 +204,15 @@ export async function reportToAigp(force = false): Promise<AigpStatus | null> {
       ? {
           at: now,
           ok: true,
-          message: body.done ? (body.changed ? 'Read is now marked done in AIGP.' : 'Read is already done in AIGP.') : `Sent ${minutes} min read today.`,
+          message: body.done
+            ? body.changed
+              ? 'Read is now marked done in AIGP.'
+              : lower
+                ? `Corrected today to ${minutes} min; Read stays done in AIGP.`
+                : 'Read is already done in AIGP.'
+            : lower
+              ? `Corrected today to ${minutes} min read.`
+              : `Sent ${minutes} min read today.`,
         }
       : {
           at: now,
