@@ -144,7 +144,7 @@ export function SubstackSettings() {
           <li>
             Click <span className="font-medium text-ink">Load unpacked</span> and choose the folder.
           </li>
-          <li>Click the I read icon in Chrome’s toolbar and sign in with this account. Then just read on Substack.</li>
+          <li>Click the I read icon in Chrome’s toolbar and sign in with this account. Then just read on Substack — on a post, the I read pill (bottom right) has your notes and highlights, and <span className="font-medium text-ink">Alt Shift H</span> highlights with I read instead of Substack.</li>
         </ol>
         <p className="mt-3 text-body-sm text-mute">
           It counts only while you’re actually reading — the tab in front and you scrolling or moving now and then — on substack.com and newsletters on their own domains. Offline, it keeps the time and sends it later.

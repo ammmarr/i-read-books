@@ -74,6 +74,8 @@ button.link:hover { color: var(--ink); }
 .reads .empty { color: var(--mute); border-bottom: 0; }
 
 .status { margin: 10px 0 0; font-size: 11.5px; color: var(--mute); }
+.hint { margin: 10px 0 0; padding: 8px 10px; border-radius: 8px; background: var(--soft); font-size: 11.5px; color: var(--body); }
+kbd { font: 10.5px ui-monospace, SFMono-Regular, Menlo, monospace; padding: 0 4px; border: 1px solid var(--hairline); border-bottom-width: 2px; border-radius: 4px; background: var(--bg); }
 .status.warn { color: #b45309; }
 
 .foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); font-size: 12px; }

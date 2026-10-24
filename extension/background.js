@@ -132,12 +132,29 @@ async function doSync() {
         await set({ pending: now })
       })
     }
+    // Highlights and notes made on Substack pages (annotate.js).
+    const { annotations = {}, annPending = {} } = await get(['annotations', 'annPending'])
+    const annSent = { ...annPending }
+    const annRows = Object.keys(annSent).map((id) => annotations[id]).filter(Boolean).map(annToRow)
+    if (annRows.length) {
+      const res = await rest('irb_web_annotations?on_conflict=id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(annRows) })
+      if (res && !res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const missing = body.code === 'PGRST205' || res.status === 404
+        throw new Error(missing ? 'Your I read cloud needs one update before Substack highlights can sync (run the latest supabase/schema.sql). They’re kept here until then.' : body.message || `Couldn’t sync highlights (${res.status})`)
+      }
+      await serial(async () => {
+        const { annPending: now = {} } = await get('annPending')
+        for (const [id, ver] of Object.entries(annSent)) if (now[id] === ver) delete now[id]
+        await set({ annPending: now })
+      })
+    }
     // Your daily Substack goal, from I read's settings.
     const res = await rest('irb_profiles?select=settings')
     if (res?.ok) {
       const [p] = await res.json()
       const goal = Number(p?.settings?.substackGoalMinutes)
-      if (goal > 0) await set({ goal })
+      if (goal >= 0 && Number.isFinite(goal)) await set({ goal })
     }
     await set({ status: { lastSyncAt: Date.now(), error: null } })
   } catch (e) {
@@ -145,6 +162,63 @@ async function doSync() {
     await set({ status: { ...status, error: String(e?.message ?? e) } })
   }
   await updateBadge()
+}
+
+// ── Highlights and notes on Substack pages (annotate.js) ──────────────────
+//   annotations { [id]: { id, url, title, publication, kind, text, color, note, prefix, suffix, createdAt, updatedAt, deleted } }
+//   annPending  { [id]: version }   changed since the cloud last had them
+const annToRow = (a) => ({
+  id: a.id, url: a.url, title: a.title ?? null, publication: a.publication ?? null, kind: a.kind, text: a.text ?? null, color: a.color ?? null,
+  note: a.note ?? null, prefix: a.prefix ?? null, suffix: a.suffix ?? null, created_at: a.createdAt, updated_at: a.updatedAt, deleted: !!a.deleted,
+})
+const annFromRow = (r) => ({
+  id: r.id, url: r.url, title: r.title ?? undefined, publication: r.publication ?? undefined, kind: r.kind ?? 'highlight', text: r.text ?? undefined,
+  color: r.color ?? undefined, note: r.note ?? undefined, prefix: r.prefix ?? undefined, suffix: r.suffix ?? undefined,
+  createdAt: r.created_at ?? r.updated_at, updatedAt: r.updated_at, deleted: !!r.deleted,
+})
+
+function saveAnnotation(a) {
+  return serial(async () => {
+    const { annotations = {}, annPending = {} } = await get(['annotations', 'annPending'])
+    annotations[a.id] = { ...annotations[a.id], ...a, updatedAt: Date.now() }
+    annPending[a.id] = (annPending[a.id] ?? 0) + 1
+    await set({ annotations, annPending })
+    return annotations[a.id]
+  })
+}
+
+/** This page's highlights and notes: what's here, brought up to date from the cloud (edits made in the app). */
+async function annotationsFor(url) {
+  try {
+    const res = navigator.onLine ? await rest(`irb_web_annotations?url=eq.${encodeURIComponent(url)}&select=*`) : null
+    if (res?.ok) {
+      const rows = await res.json()
+      await serial(async () => {
+        const { annotations = {}, annPending = {} } = await get(['annotations', 'annPending'])
+        for (const r of rows) {
+          const local = annotations[r.id]
+          if (!local || (!annPending[r.id] && r.updated_at > (local.updatedAt ?? 0))) annotations[r.id] = annFromRow(r)
+        }
+        await set({ annotations })
+      })
+    }
+  } catch {
+    /* offline or not signed in: what's here will do */
+  }
+  const { annotations = {} } = await get('annotations')
+  return Object.values(annotations).filter((a) => a.url === url && !a.deleted)
+}
+
+/** The little tracker on the page: this article's time, and today's against the goal. */
+async function pageStatus(url) {
+  const { visits = {}, goal = DEFAULT_GOAL, auth: a } = await get(['visits', 'goal', 'auth'])
+  const today = startOfDay()
+  let todaySecs = 0, articleSecs = 0
+  for (const v of Object.values(visits)) {
+    if (v.start >= today) todaySecs += v.seconds
+    if (v.url === url) articleSecs += v.seconds
+  }
+  return { signedIn: !!a, todaySecs, articleSecs, goal, appUrl: CONFIG.appUrl }
 }
 
 // ── Posting a Substack Note you shared from I read ───────────────────────
@@ -224,6 +298,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   }
   if (msg?.type === 'signOut') {
     set({ auth: null, status: { lastSyncAt: null, error: null } }).then(updateBadge).then(() => reply({ ok: true }))
+    return true
+  }
+  if (msg?.type === 'annList' && msg.url) {
+    annotationsFor(String(msg.url)).then(reply, () => reply([]))
+    return true
+  }
+  if (msg?.type === 'annSave' && msg.annotation?.id) {
+    saveAnnotation(msg.annotation).then((a) => {
+      reply(a)
+      clearTimeout(globalThis.__syncSoon)
+      globalThis.__syncSoon = setTimeout(sync, 3000)
+    })
+    return true
+  }
+  if (msg?.type === 'pageStatus' && msg.url) {
+    pageStatus(String(msg.url)).then(reply)
     return true
   }
   if (msg?.type === 'substackTab' && _sender.tab?.id != null) {

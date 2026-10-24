@@ -1,8 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDownUp, ExternalLink, Search, Trash2, X } from 'lucide-react'
-import { db, type WebRead } from '../db/db'
+import { ArrowDownUp, ExternalLink, Highlighter, NotebookPen, Search, Trash2, X } from 'lucide-react'
+import { db, uid, type WebAnnotation, type WebRead } from '../db/db'
+import { Sheet } from '../components/ui/Sheet'
+import { swatchOf } from '../reader/HighlightTools'
 import { Button } from '../components/ui/Button'
 import { Menu } from '../components/ui/Menu'
 import { useToast } from '../components/ui/Toast'
@@ -116,6 +119,19 @@ export function SubstackShelf({ reads, pub, setPub }: { reads: WebRead[]; pub: s
   const touch = useIsTouch()
   const { toast } = useToast()
   const articles = useMemo(() => articlesOf(reads), [reads])
+  // Highlights and notes made on the page with the extension (Alt+Shift+H).
+  const anns = useLiveQuery(() => db.webAnnotations.toArray(), []) ?? []
+  const marks = useMemo(() => {
+    const m = new Map<string, { highlights: number; note: boolean }>()
+    for (const a of anns) {
+      const x = m.get(a.url) ?? { highlights: 0, note: false }
+      if (a.kind === 'highlight') x.highlights++
+      else if (a.note?.trim()) x.note = true
+      m.set(a.url, x)
+    }
+    return m
+  }, [anns])
+  const [opened, setOpened] = useState<Article | null>(null)
   const letters = useMemo(() => newslettersOf(articles), [articles])
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>(() => {
@@ -239,17 +255,26 @@ export function SubstackShelf({ reads, pub, setPub }: { reads: WebRead[]; pub: s
               <AnimatePresence initial={false}>
                 {g.items.map((a) => (
                   <motion.li key={a.url} layout initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, height: 0 }} className="group relative">
-                    <a href={a.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-4 py-3 pl-3 pr-12 transition-colors hover:bg-hairline-soft/60 sm:pl-4">
+                    <button onClick={() => setOpened(a)} className="flex w-full items-center gap-4 py-3 pl-3 pr-12 text-left transition-colors hover:bg-hairline-soft/60 sm:pl-4">
                       <Monogram name={a.publication} size="sm" className="w-10 shrink-0" />
                       <div className="min-w-0 flex-1">
                         <div className="line-clamp-2 text-label-sm text-ink group-hover:underline group-hover:decoration-hairline group-hover:underline-offset-4">{a.title}</div>
-                        <div className="mt-0.5 truncate text-body-sm text-mute">{[a.publication, a.author].filter(Boolean).join(' · ')}</div>
+                        <div className="mt-0.5 flex items-center gap-2 truncate text-body-sm text-mute">
+                          <span className="truncate">{[a.publication, a.author].filter(Boolean).join(' · ')}</span>
+                          {!!marks.get(a.url)?.highlights && (
+                            <span className="inline-flex shrink-0 items-center gap-0.5 text-body" title={pluralize(marks.get(a.url)!.highlights, 'highlight')}>
+                              <Highlighter className="size-3" />
+                              {marks.get(a.url)!.highlights}
+                            </span>
+                          )}
+                          {marks.get(a.url)?.note && <NotebookPen className="size-3 shrink-0 text-body" aria-label="Has notes" />}
+                        </div>
                       </div>
                       <div className="shrink-0 text-right">
                         <div className="text-body-sm tabular text-ink">{a.seconds < 60 ? `${a.seconds}s` : formatDuration(a.seconds, { short: true })}</div>
                         <div className="text-body-sm text-faint">{sort === 'recent' ? timeOrDays(a) : relativeTime(a.last)}</div>
                       </div>
-                    </a>
+                    </button>
                     <button
                       onClick={() => remove(a)}
                       aria-label={`Remove ${a.title} from your reading`}
@@ -271,7 +296,112 @@ export function SubstackShelf({ reads, pub, setPub }: { reads: WebRead[]; pub: s
           </div>
         )}
       </div>
+      <ArticleSheet article={opened} annotations={anns} onClose={() => setOpened(null)} />
     </>
+  )
+}
+
+/** An article's details: pick it up again, your notes, and your highlights from the page. */
+function ArticleSheet({ article: a, annotations, onClose }: { article: Article | null; annotations: WebAnnotation[]; onClose: () => void }) {
+  const { toast } = useToast()
+  const mine = useMemo(() => (a ? annotations.filter((x) => x.url === a.url) : []), [a, annotations])
+  const hs = mine.filter((x) => x.kind === 'highlight').sort((x, y) => x.createdAt - y.createdAt)
+  const noteRow = mine.find((x) => x.kind === 'note')
+  const [notes, setNotes] = useState('')
+  const [saved, setSaved] = useState('')
+  const editing = useRef(false)
+  useEffect(() => {
+    if (!editing.current) setNotes(noteRow?.note ?? '')
+  }, [a?.url, noteRow?.note]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Notes save as you type (the same notes as on the page, through the extension).
+  useEffect(() => {
+    if (!a || !editing.current) return
+    setSaved('Saving…')
+    const t = setTimeout(async () => {
+      if (noteRow) await db.webAnnotations.update(noteRow.id, { note: notes })
+      else await db.webAnnotations.add({ id: uid(), url: a.url, title: a.title, publication: a.publication, kind: 'note', note: notes, createdAt: Date.now() })
+      editing.current = false
+      setSaved('Saved')
+    }, 500)
+    return () => clearTimeout(t)
+  }, [notes]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const remove = async (h: WebAnnotation) => {
+    await db.webAnnotations.delete(h.id)
+    toast({ message: 'Highlight removed', action: { label: 'Undo', onClick: () => void db.webAnnotations.put(h) } })
+  }
+
+  return (
+    <Sheet open={!!a} onClose={onClose} side="right" width={480} title={a?.title ?? ''} description={a ? [a.publication, a.author].filter(Boolean).join(' · ') : undefined}>
+      {a && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-4">
+            <Monogram name={a.publication} className="w-16 shrink-0 shadow-cover" />
+            <div className="min-w-0 flex-1">
+              <p className="text-body-md text-body">
+                <span className="font-medium text-ink">{formatDurationLong(a.seconds)}</span> read{a.days > 1 ? ` over ${a.days} days` : ''}
+              </p>
+              <p className="text-body-sm text-mute">Last opened {relativeTime(a.last)}</p>
+              <a
+                href={a.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex h-9 items-center gap-2 rounded-sm bg-ink px-4 text-sm font-medium text-canvas transition-colors hover:bg-ink/85"
+              >
+                <ExternalLink className="size-4" /> Continue reading
+              </a>
+            </div>
+          </div>
+
+          <section>
+            <div className="mb-2 text-mono-eyebrow text-mute">Notes</div>
+            <textarea
+              value={notes}
+              onChange={(e) => {
+                editing.current = true
+                setNotes(e.target.value)
+              }}
+              placeholder="Your thoughts on this article…"
+              rows={5}
+              className="block w-full resize-y rounded-md border border-hairline bg-canvas-elevated p-3 text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-link focus:ring-3 focus:ring-link/15"
+            />
+            <p className="mt-1 h-4 text-body-sm text-faint">{saved}</p>
+          </section>
+
+          <section>
+            <div className="mb-2 text-mono-eyebrow text-mute">Highlights{hs.length ? ` · ${hs.length}` : ''}</div>
+            {hs.length ? (
+              <ul className="space-y-1">
+                {hs.map((h) => (
+                  <li key={h.id} className="group flex gap-3 rounded-sm px-2 py-2.5 hover:bg-hairline-soft">
+                    <span className="w-[3px] shrink-0 self-stretch rounded-full" style={{ background: swatchOf(h.color ?? 'yellow') }} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-body-md text-ink">“{h.text}”</span>
+                      {h.note?.trim() && <span className="mt-1.5 block rounded-sm bg-hairline-soft px-2 py-1.5 text-body-sm text-body">{h.note}</span>}
+                      <span className="mt-1 block text-body-sm text-faint">{relativeTime(h.createdAt)}</span>
+                    </span>
+                    <button
+                      onClick={() => remove(h)}
+                      aria-label="Remove highlight"
+                      className="grid size-8 shrink-0 place-items-center rounded-full text-faint opacity-0 transition-opacity hover:bg-error/10 hover:text-error group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="rounded-md border border-dashed border-hairline px-4 py-6 text-center text-body-md text-mute">
+                On the article, press <kbd className="rounded-[4px] border border-hairline bg-hairline-soft px-1.5 font-mono text-[12px] text-ink">Alt</kbd>{' '}
+                <kbd className="rounded-[4px] border border-hairline bg-hairline-soft px-1.5 font-mono text-[12px] text-ink">Shift</kbd>{' '}
+                <kbd className="rounded-[4px] border border-hairline bg-hairline-soft px-1.5 font-mono text-[12px] text-ink">H</kbd> and select text to highlight it with I read.
+              </p>
+            )}
+          </section>
+        </div>
+      )}
+    </Sheet>
   )
 }
 

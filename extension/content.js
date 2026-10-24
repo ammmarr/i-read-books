@@ -34,6 +34,8 @@
     host.endsWith('.substack.com') ||
     !!document.querySelector('link[href*="substackcdn.com"], script[src*="substackcdn.com"], img[src*="substackcdn.com"]')
   if (!substack) return
+  // For annotate.js (notes and highlights), which runs next in this same page.
+  globalThis.__irbSubstack = true
 
   // ── On substack.com: post a Note the way Substack's own page does — from
   // this page, with your signed-in session — when the extension asks.

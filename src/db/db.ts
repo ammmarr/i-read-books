@@ -192,6 +192,28 @@ export interface WebRead extends Synced {
   seconds: number
 }
 
+/**
+ * A highlight or a note on a web article (Substack), made with the I read
+ * extension on the page itself. Highlights find their way back to the text
+ * by the quote and a little of what's around it.
+ */
+export interface WebAnnotation extends Synced {
+  id: string
+  url: string
+  title?: string
+  publication?: string
+  kind: 'highlight' | 'note'
+  /** The highlighted words (highlights). */
+  text?: string
+  color?: HighlightColor
+  /** Your note: on a highlight, or the article's notes. */
+  note?: string
+  /** A little text before and after the quote, to find it again. */
+  prefix?: string
+  suffix?: string
+  createdAt: number
+}
+
 class ReaderDB extends Dexie {
   books!: EntityTable<Book, 'id'>
   files!: EntityTable<BookFile, 'id'>
@@ -202,6 +224,7 @@ class ReaderDB extends Dexie {
   recaps!: EntityTable<Recap, 'id'>
   lookups!: EntityTable<Lookup, 'id'>
   webReads!: EntityTable<WebRead, 'id'>
+  webAnnotations!: EntityTable<WebAnnotation, 'id'>
 
   constructor() {
     super('i-read-books')
@@ -243,6 +266,7 @@ class ReaderDB extends Dexie {
       })
     this.version(5).stores({ lookups: 'id, word, bookId, lookedAt, updatedAt, dirty' })
     this.version(6).stores({ webReads: 'id, start, updatedAt, dirty' })
+    this.version(7).stores({ webAnnotations: 'id, url, createdAt, updatedAt, dirty' })
   }
 }
 
@@ -261,8 +285,8 @@ export const uid = () =>
 // leave a tombstone. Writes made *by the sync engine* opt out by running in a
 // transaction registered with `markSyncTransaction`.
 
-export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps' | 'lookups' | 'webReads'
-export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps', 'lookups', 'webReads']
+export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps' | 'lookups' | 'webReads' | 'webAnnotations'
+export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps', 'lookups', 'webReads', 'webAnnotations']
 
 /** Fields that never leave this device, so changing them alone isn't a sync-worthy edit. */
 const LOCAL_ONLY = new Set(['cover', 'dirty', 'uploadError', 'enriched', 'positionBase', 'otherPosition'])

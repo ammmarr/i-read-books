@@ -146,6 +146,27 @@ create table if not exists public.irb_web_reads (
   deleted     boolean not null default false
 );
 
+-- Highlights and notes on Substack articles, made on the page with the
+-- Chrome extension (extension/annotate.js). One row each.
+create table if not exists public.irb_web_annotations (
+  id          uuid primary key,
+  user_id     uuid not null default auth.uid() references auth.users on delete cascade,
+  url         text not null,
+  title       text,
+  publication text,
+  kind        text not null default 'highlight',
+  text        text,
+  color       text,
+  note        text,
+  prefix      text,
+  suffix      text,
+  created_at  bigint,
+  updated_at  bigint not null,
+  server_ts   bigint,
+  deleted     boolean not null default false
+);
+create index if not exists irb_web_annotations_url on public.irb_web_annotations (user_id, url);
+
 create table if not exists public.irb_profiles (
   user_id     uuid primary key default auth.uid() references auth.users on delete cascade,
   settings    jsonb,
@@ -164,7 +185,7 @@ alter table public.irb_recaps add column if not exists parent text;
 do $$
 declare t text;
 begin
-  foreach t in array array['irb_books', 'irb_highlights', 'irb_bookmarks', 'irb_sessions', 'irb_recaps', 'irb_lookups', 'irb_web_reads', 'irb_profiles'] loop
+  foreach t in array array['irb_books', 'irb_highlights', 'irb_bookmarks', 'irb_sessions', 'irb_recaps', 'irb_lookups', 'irb_web_reads', 'irb_web_annotations', 'irb_profiles'] loop
     execute format('drop trigger if exists %1$s_touch on public.%1$s', t);
     execute format('create trigger %1$s_touch before insert or update on public.%1$s for each row execute function public.irb_touch()', t);
     execute format('create index if not exists %1$s_user_ts on public.%1$s (user_id, server_ts)', t);
