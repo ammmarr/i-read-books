@@ -17,7 +17,8 @@ const walk = (dir) => {
     if (statSync(p).isDirectory()) walk(p)
     else {
       const rel = relative(dist, p).split('\\').join('/')
-      if (rel.startsWith('live/') || rel === 'version.json') continue
+      // (the Chrome extension zip is for the website only)
+      if (rel.startsWith('live/') || rel === 'version.json' || rel === 'i-read-substack.zip') continue
       // Already-compressed files gain nothing from deflate.
       files[rel] = [readFileSync(p), { level: /\.(png|jpe?g|webp|woff2?|zip|gz|br)$/i.test(rel) ? 0 : 6 }]
     }

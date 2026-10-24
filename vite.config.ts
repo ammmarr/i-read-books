@@ -82,6 +82,8 @@ export default defineConfig({
         globPatterns: ['**/*.{js,mjs,css,html,svg,png,woff2,bcmap,pfb,ttf,wasm,icc}'],
         maximumFileSizeToCacheInBytes: 12 * 1024 * 1024,
         navigateFallback: 'index.html',
+        // Downloads (the Chrome extension zip) are files, not app pages.
+        navigateFallbackDenylist: [/\.zip$/],
       },
     }),
   ],

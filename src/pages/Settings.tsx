@@ -13,6 +13,7 @@ import { isStandalone, useInstallPrompt } from '../lib/install'
 import { formatBytes } from '../lib/format'
 import { AccountSync } from '../components/AccountSync'
 import { AigpSettings } from '../components/AigpSettings'
+import { SubstackSettings } from '../components/SubstackTime'
 import { useImporter } from '../components/Importer'
 import { cloudEnabled } from '../lib/supabase'
 import { setRecapsEnabled, setSectionRecaps, useRecapPrefs } from '../lib/recaps'
@@ -78,6 +79,10 @@ export default function SettingsPage() {
             </button>
           ))}
         </div>
+      </Group>
+
+      <Group title="Substack" desc="Its own daily goal for reading ideas and general knowledge on Substack, apart from your books. A small Chrome extension counts the time and adds it here.">
+        <SubstackSettings />
       </Group>
 
       <Group title="AIGP" desc="Connect your habit tracker: it marks Read done for the day once your reading reaches its goal.">

@@ -175,6 +175,23 @@ export interface Lookup extends Synced {
   lookedAt: number
 }
 
+/**
+ * Reading on the web, counted by the Chrome extension (extension/): one
+ * record per page per day, active seconds only. Written by the extension
+ * straight into the cloud; the app reads it from there.
+ */
+export interface WebRead extends Synced {
+  id: string
+  site: 'substack'
+  url: string
+  title?: string
+  publication?: string
+  author?: string
+  start: number
+  end: number
+  seconds: number
+}
+
 class ReaderDB extends Dexie {
   books!: EntityTable<Book, 'id'>
   files!: EntityTable<BookFile, 'id'>
@@ -184,6 +201,7 @@ class ReaderDB extends Dexie {
   settings!: EntityTable<Setting, 'key'>
   recaps!: EntityTable<Recap, 'id'>
   lookups!: EntityTable<Lookup, 'id'>
+  webReads!: EntityTable<WebRead, 'id'>
 
   constructor() {
     super('i-read-books')
@@ -224,6 +242,7 @@ class ReaderDB extends Dexie {
         })
       })
     this.version(5).stores({ lookups: 'id, word, bookId, lookedAt, updatedAt, dirty' })
+    this.version(6).stores({ webReads: 'id, start, updatedAt, dirty' })
   }
 }
 
@@ -242,8 +261,8 @@ export const uid = () =>
 // leave a tombstone. Writes made *by the sync engine* opt out by running in a
 // transaction registered with `markSyncTransaction`.
 
-export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps' | 'lookups'
-export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps', 'lookups']
+export type SyncTable = 'books' | 'highlights' | 'bookmarks' | 'sessions' | 'recaps' | 'lookups' | 'webReads'
+export const SYNC_TABLES: SyncTable[] = ['books', 'highlights', 'bookmarks', 'sessions', 'recaps', 'lookups', 'webReads']
 
 /** Fields that never leave this device, so changing them alone isn't a sync-worthy edit. */
 const LOCAL_ONLY = new Set(['cover', 'dirty', 'uploadError', 'enriched', 'positionBase', 'otherPosition'])

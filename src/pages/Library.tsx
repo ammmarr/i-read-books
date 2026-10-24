@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react'
 import { ArrowDownUp, BookOpen, ChevronsRight, FilePlus, Flame, Plus, Search, X } from 'lucide-react'
 import { unreadAhead } from '../lib/pages'
 import { continueFrom } from '../lib/openBook'
+import { SubstackTodayLine } from '../components/SubstackTime'
 import { db, type Book, type BookStatus } from '../db/db'
 import { bookProgress } from '../db/books'
 import { PageContainer } from '../components/AppShell'
@@ -313,6 +314,7 @@ function TodayCard({ sessions }: { sessions: import('../db/db').Session[] }) {
             {s.current > 0 ? `${s.current}-day streak` : 'Start a streak today'}
             {s.longest > s.current && ` · best ${s.longest}`}
           </p>
+          <SubstackTodayLine />
         </div>
       </Link>
     </motion.div>

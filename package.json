@@ -8,7 +8,7 @@
     "dev": "vite --host",
     "prebuild": "node scripts/copy-pdfjs.mjs",
     "build": "tsc -b && vite build",
-    "postbuild": "node scripts/make-live-bundle.mjs",
+    "postbuild": "node scripts/make-extension.mjs && node scripts/make-live-bundle.mjs",
     "preview": "vite preview --host",
     "lint": "oxlint"
   },

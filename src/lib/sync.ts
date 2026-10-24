@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import {
   db, markSyncTransaction, readTombstones, setLocalChangeListener, writeTombstones, SYNC_TABLES,
-  type Book, type Bookmark, type Highlight, type Recap, type Lookup, type Session, type SyncTable,
+  type Book, type Bookmark, type Highlight, type Recap, type Lookup, type Session, type SyncTable, type WebRead,
 } from '../db/db'
 import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
 import { formatPages, readPagesOf } from './pages'
@@ -53,6 +53,7 @@ const REMOTE: Record<SyncTable, string> = {
   sessions: 'irb_sessions',
   recaps: 'irb_recaps',
   lookups: 'irb_lookups',
+  webReads: 'irb_web_reads',
 }
 
 /** Supabase's free plan caps a single upload at 50 MB. */
@@ -108,6 +109,13 @@ function toRemote(table: SyncTable, r: Row): Row {
         updated_at: l.updatedAt ?? Date.now(), deleted: false,
       }
     }
+    case 'webReads': {
+      const w = r as unknown as WebRead
+      return {
+        id: w.id, site: w.site, url: w.url, title: n(w.title), publication: n(w.publication), author: n(w.author),
+        start_ms: w.start, end_ms: w.end, seconds: w.seconds, updated_at: w.updatedAt ?? Date.now(), deleted: false,
+      }
+    }
   }
 }
 
@@ -158,6 +166,11 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
       return {
         ...base, id: r.id, word: r.word ?? '', bookId: r.book_id, page: r.page ?? 0, top: u(r.top_frac as number | null), context: u(r.context as string | null),
         gist: u(r.gist as string | null), lookedAt: r.looked_at ?? r.updated_at,
+      }
+    case 'webReads':
+      return {
+        ...base, id: r.id, site: r.site ?? 'substack', url: r.url ?? '', title: u(r.title as string | null), publication: u(r.publication as string | null),
+        author: u(r.author as string | null), start: r.start_ms ?? r.updated_at, end: r.end_ms ?? r.start_ms ?? r.updated_at, seconds: r.seconds ?? 0,
       }
   }
 }
@@ -366,6 +379,7 @@ function refreshWarning() {
   if (missingColumns.size) parts.push('Your cloud database is older than this app, so a few details (like hand-edited progress) aren’t saved.')
   if (missingTables.has('irb_recaps')) parts.push('Chapter recaps aren’t syncing between your devices yet.')
   if (missingTables.has('irb_lookups')) parts.push('Looked-up words aren’t syncing between your devices yet.')
+  if (missingTables.has('irb_web_reads')) parts.push('Substack reading time from the Chrome extension can’t arrive yet.')
   set({ warning: parts.length ? `${parts.join(' ')} Run the latest supabase/schema.sql once to finish the update.` : null })
 }
 

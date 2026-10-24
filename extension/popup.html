@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>I read · Substack time</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main id="app">
+      <header class="head">
+        <img src="icons/32.png" alt="" width="22" height="22" />
+        <div>
+          <div class="brand">I read</div>
+          <div class="sub">Substack time</div>
+        </div>
+      </header>
+
+      <!-- Signed out -->
+      <section id="signed-out" hidden>
+        <h1>Count your Substack reading</h1>
+        <p class="muted">Sign in with your I read account. The time you actively read on Substack is added to the app — on every device.</p>
+        <form id="sign-in">
+          <label>Email<input id="email" type="email" autocomplete="email" required /></label>
+          <label>Password<input id="password" type="password" autocomplete="current-password" required /></label>
+          <button type="submit" id="sign-in-btn">Sign in</button>
+          <p id="sign-in-error" class="error" role="alert" hidden></p>
+        </form>
+      </section>
+
+      <!-- Signed in -->
+      <section id="signed-in" hidden>
+        <div class="today">
+          <div class="eyebrow">Today</div>
+          <div class="big"><span id="mins">0</span><span class="unit">of <span id="goal">30</span> min</span></div>
+          <div class="bar"><div id="bar-fill"></div></div>
+          <p id="today-note" class="muted"></p>
+        </div>
+        <ul id="reads" class="reads"></ul>
+        <p id="status" class="status"></p>
+      </section>
+
+      <footer class="foot">
+        <a id="open-app" href="#" target="_blank" rel="noopener">Open I read</a>
+        <span id="who" class="muted"></span>
+        <button id="sign-out" class="link" hidden>Sign out</button>
+      </footer>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

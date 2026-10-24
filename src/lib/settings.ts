@@ -17,6 +17,8 @@ export interface Settings {
   recapSections: boolean
   /** Books where you said "don't ask" for recaps. */
   recapsOffBooks: string[]
+  /** Daily minutes on Substack (counted by the Chrome extension) — apart from the books goal. */
+  substackGoalMinutes: number
   /** Night Shift (warm screen) — this device only. See lib/nightShift.ts. */
   nightShift: 'off' | 'on' | 'scheduled'
   /** 0 (a hint) – 1 (deep amber). */
@@ -38,6 +40,7 @@ const DEFAULTS: Settings = {
   chapterRecaps: true,
   recapSections: true,
   recapsOffBooks: [],
+  substackGoalMinutes: 30,
   nightShift: 'off',
   nightShiftWarmth: 0.45,
   nightShiftFrom: '21:00',
@@ -65,7 +68,7 @@ export function getSettings() {
 }
 
 /** Settings that follow you across devices (theme stays per-device). */
-export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapSections', 'recapsOffBooks']
+export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapSections', 'recapsOffBooks', 'substackGoalMinutes']
 const META_KEY = 'irb-settings-meta'
 
 export function getSettingsMeta(): { updatedAt: number; dirty: boolean } {

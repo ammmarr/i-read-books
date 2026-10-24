@@ -13,6 +13,7 @@ import { Button } from '../components/ui/Button'
 import { ProgressBar } from '../components/ui/Progress'
 import { Segmented } from '../components/ui/Segmented'
 import { useSettings } from '../lib/settings'
+import { SubstackInsights } from '../components/SubstackTime'
 import { useCountUp } from '../lib/hooks'
 import { compact, formatDuration, formatDurationLong } from '../lib/format'
 import {
@@ -48,6 +49,7 @@ export default function Stats() {
         }
       />
       {sessions.length === 0 ? <NoData hasBooks={books.length > 0} /> : <Dashboard key={range} range={range} sessions={sessions} books={books} />}
+      <SubstackInsights />
     </PageContainer>
   )
 }
