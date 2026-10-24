@@ -147,6 +147,67 @@ async function doSync() {
   await updateBadge()
 }
 
+// ── Posting a Substack Note you shared from I read ───────────────────────
+// Sent from a substack.com page with your signed-in session — an open
+// substack.com tab if there is one, else a quiet background tab, closed after.
+const APP_ORIGIN = new URL(CONFIG.appUrl).origin
+const tabWaiters = new Map()
+
+async function knownTabs() {
+  const { substackTabs = [] } = await chrome.storage.session.get('substackTabs')
+  return substackTabs
+}
+async function rememberTab(id) {
+  const tabs = await knownTabs()
+  if (!tabs.includes(id)) await chrome.storage.session.set({ substackTabs: [...tabs, id].slice(-10) })
+  tabWaiters.get(id)?.()
+  tabWaiters.delete(id)
+}
+chrome.tabs.onRemoved.addListener(async (id) => {
+  const tabs = await knownTabs()
+  if (tabs.includes(id)) await chrome.storage.session.set({ substackTabs: tabs.filter((t) => t !== id) })
+})
+
+/** A Note as Substack stores it: one paragraph per line (blank lines kept). */
+const noteDoc = (text) => ({
+  type: 'doc',
+  attrs: { schemaVersion: 'v1' },
+  content: text
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => (line.trim() ? { type: 'paragraph', content: [{ type: 'text', text: line }] } : { type: 'paragraph' })),
+})
+
+async function postNote(text) {
+  const bodyJson = noteDoc(text.trim())
+  const ask = (tabId) => chrome.tabs.sendMessage(tabId, { type: 'postNote', bodyJson })
+  for (const id of [...(await knownTabs())].reverse()) {
+    try {
+      const res = await ask(id)
+      if (res) return res
+    } catch {
+      /* closed, or left over from before an extension reload */
+    }
+  }
+  const tab = await chrome.tabs.create({ url: 'https://substack.com/home', active: false })
+  try {
+    await new Promise((resolve, reject) => {
+      tabWaiters.set(tab.id, resolve)
+      setTimeout(() => reject(new Error('Substack didn’t open in time — try again.')), 25_000)
+    })
+    return await ask(tab.id)
+  } finally {
+    tabWaiters.delete(tab.id)
+    chrome.tabs.remove(tab.id).catch(() => {})
+  }
+}
+
+const explain = (res) => {
+  if (res?.ok) return res
+  const s = res?.status
+  return { ...res, ok: false, error: s === 401 || s === 403 ? 'Sign in to substack.com in Chrome, then try again.' : res?.error || 'Couldn’t post the Note.' }
+}
+
 // ── Wiring ────────────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg?.type === 'read' && msg.visit?.id) {
@@ -163,6 +224,22 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   }
   if (msg?.type === 'signOut') {
     set({ auth: null, status: { lastSyncAt: null, error: null } }).then(updateBadge).then(() => reply({ ok: true }))
+    return true
+  }
+  if (msg?.type === 'substackTab' && _sender.tab?.id != null) {
+    rememberTab(_sender.tab.id)
+    return false
+  }
+  if (msg?.type === 'substackNote') {
+    // Only I read itself may post for you.
+    if (_sender.origin !== APP_ORIGIN) {
+      reply({ ok: false, error: 'Not allowed from this site.' })
+      return false
+    }
+    postNote(String(msg.text ?? '')).then(
+      (res) => reply(explain(res)),
+      (e) => reply({ ok: false, error: String(e?.message ?? e) }),
+    )
     return true
   }
   if (msg?.type === 'syncNow') {

@@ -40,6 +40,10 @@ const walk = (dir) => {
 }
 walk('extension')
 files['i-read-substack/config.js'] = strToU8(config)
+// The one site allowed to ask the extension to post (content.js checks it).
+const content = readFileSync('extension/content.js', 'utf8')
+if (!content.includes("'__APP_ORIGIN__'")) throw new Error('make-extension: content.js has no __APP_ORIGIN__ placeholder')
+files['i-read-substack/content.js'] = strToU8(content.replace("'__APP_ORIGIN__'", JSON.stringify(new URL(appUrl).origin)))
 
 mkdirSync('dist', { recursive: true })
 writeFileSync('dist/i-read-substack.zip', zipSync(files, { level: 6 }))

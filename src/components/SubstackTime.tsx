@@ -8,6 +8,8 @@ import { formatDuration, formatDurationLong, relativeTime } from '../lib/format'
 import { BarChart } from './charts/BarChart'
 import { ProgressBar } from './ui/Progress'
 import { isNative } from '../lib/native'
+import { useExtension } from '../lib/share'
+import { SubstackMark, XMark } from './ShareQuote'
 
 /**
  * Substack reading, counted by the Chrome extension (extension/) — its own
@@ -95,6 +97,46 @@ function ReadRow({ r }: { r: WebRead }) {
         <ExternalLink className="size-3.5 shrink-0 self-center text-faint" />
       </a>
     </li>
+  )
+}
+
+/** Settings → Sharing: where quotes go, and whether posting to Substack is ready here. */
+export function SharingSettings() {
+  const ext = useExtension()
+  return (
+    <div className="divide-y divide-hairline">
+      <div className="flex items-start gap-3 py-3 first:pt-0">
+        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-ink text-canvas">
+          <XMark className="size-3.5" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-body-md text-ink">X</div>
+          <div className="text-body-sm text-mute">Nothing to connect: sharing opens X’s post screen with your quote and the book filled in — you press Post, as whoever is signed in to X.</div>
+        </div>
+      </div>
+      <div className="flex items-start gap-3 py-3 last:pb-0">
+        <span className="mt-0.5 grid size-8 shrink-0 place-items-center rounded-full bg-[#ff6719] text-white">
+          <SubstackMark className="size-3.5" />
+        </span>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-body-md text-ink">
+            Substack
+            <span className={`rounded-full px-2 py-px text-[11px] font-medium ${ext.canPost ? 'bg-success/15 text-success' : 'bg-hairline-soft text-mute'}`}>
+              {ext.canPost ? 'Ready' : ext.present ? 'Update the extension' : isNative ? 'Copy & paste here' : 'Needs the extension'}
+            </span>
+          </div>
+          <div className="text-body-sm text-mute">
+            {ext.canPost
+              ? 'Quotes post as a Note from whoever is signed in to substack.com in this Chrome — through the I read extension. You check the Note before it goes.'
+              : ext.present
+                ? 'This version of the extension can’t post yet: download it again above, replace the folder, and press Reload on chrome://extensions.'
+                : isNative
+                  ? 'On the tablet, sharing copies the quote and opens Substack Notes to paste it. Posting it for you works in Chrome on your PC with the I read extension.'
+                  : 'Install the I read extension (Substack, above) and sign in to substack.com in Chrome — then quotes post as Notes straight from here.'}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 

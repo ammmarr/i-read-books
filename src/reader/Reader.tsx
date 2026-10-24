@@ -18,7 +18,9 @@ import { BookCover } from '../components/BookCover'
 import { Sheet } from '../components/ui/Sheet'
 import { PageView, type PageHit } from './PageView'
 import { DocText, findInPage, normalizeQuery, type Match } from './textIndex'
-import { HighlightPopover, SelectionToolbar, HL_COLORS } from './HighlightTools'
+import { HighlightPopover, SelectionToolbar, HL_COLORS, type ShareTo } from './HighlightTools'
+import { SubstackNoteSheet } from '../components/ShareQuote'
+import { noteText, openXPost, xPostText } from '../lib/share'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { wordFrom } from '../lib/dictionary'
 import { placeOf, wordAtPoint } from './wordAt'
@@ -1294,6 +1296,29 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     [toast],
   )
 
+  // ── Sharing a quote: X opens its post screen; Substack gets a Note to check first ──
+  const [noteDraft, setNoteDraft] = useState<string | null>(null)
+  const shareQuote = useCallback(
+    (text: string, to: ShareTo) => {
+      if (!text.trim()) return
+      if (to === 'x') openXPost(xPostText(text, book))
+      else setNoteDraft(noteText(text, book))
+    },
+    [book],
+  )
+  const shareSelection = useCallback(
+    (to: ShareTo) => {
+      const root = content.current
+      const text = root ? selectionPieces(root).map((p) => p.text).join(' ') : ''
+      shareQuote(text || window.getSelection()?.toString() || '', to)
+      if (to === 'substack') {
+        window.getSelection()?.removeAllRanges()
+        setSelAnchor(null)
+      }
+    },
+    [shareQuote],
+  )
+
   const copySelection = useCallback(async () => {
     const t = window.getSelection()?.toString().replace(/\s+/g, ' ').trim()
     if (!t) return
@@ -2031,6 +2056,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         onHighlight={(c) => createHighlight(c)}
         onNote={() => createHighlight(((() => { try { return localStorage.getItem('irb-last-color') } catch { return null } })() as HighlightColor) || 'yellow', true)}
         onCopy={copySelection}
+        onShare={shareSelection}
         onRemove={selAnchor?.under?.length ? () => removeHighlights(selAnchor.under!) : undefined}
         onDefine={
           selAnchor?.word
@@ -2052,6 +2078,11 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
           toast({ id: 'copy', message: 'Copied to clipboard', duration: 1500 })
           setActive(null)
         }}
+        onShare={(to) => {
+          if (!activeHighlight) return
+          shareQuote(activeHighlight.text, to)
+          setActive(null)
+        }}
         onDelete={async () => {
           const h = activeHighlight
           if (!h) return
@@ -2060,6 +2091,8 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
           toast({ message: 'Highlight deleted', action: { label: 'Undo', onClick: () => db.highlights.put(h) } })
         }}
       />
+
+      <SubstackNoteSheet text={noteDraft} onClose={() => setNoteDraft(null)} />
 
       <ReaderSidebar
         open={sidebar.open}

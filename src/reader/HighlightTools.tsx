@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { AnimatePresence, motion } from 'motion/react'
-import { BookA, Check, Copy, Eraser, StickyNote, Trash2 } from 'lucide-react'
+import { BookA, Check, Copy, Eraser, Share2, StickyNote, Trash2 } from 'lucide-react'
+import { SubstackMark, XMark } from '../components/ShareQuote'
 import type { Highlight, HighlightColor } from '../db/db'
 
 export const HL_COLORS: { key: HighlightColor; swatch: string; label: string }[] = [
@@ -62,18 +63,20 @@ function Swatches({ value, onPick }: { value?: HighlightColor; onPick: (c: Highl
 }
 
 export function SelectionToolbar({
-  anchor, onHighlight, onNote, onCopy, onDefine, onRemove,
+  anchor, onHighlight, onNote, onCopy, onShare, onDefine, onRemove,
 }: {
   anchor: Anchor | null
   onHighlight: (c: HighlightColor) => void
   onNote: () => void
   onCopy: () => void
+  /** Post the selection on X or as a Substack Note. */
+  onShare?: (to: ShareTo) => void
   /** Shown when the selection runs into highlights: remove them. */
   onRemove?: () => void
   /** Shown when the selection is a word (or a short phrase): its meaning. */
   onDefine?: () => void
 }) {
-  const pos = usePlacement(anchor, { w: 300 + (onDefine ? 36 : 0) + (onRemove ? 36 : 0), h: 44 })
+  const pos = usePlacement(anchor, { w: 300 + (onShare ? 36 : 0) + (onDefine ? 36 : 0) + (onRemove ? 36 : 0), h: 44 })
   return createPortal(
     <AnimatePresence>
       {anchor && (
@@ -97,6 +100,7 @@ export function SelectionToolbar({
           <ToolBtn label="Copy" onClick={onCopy}>
             <Copy className="size-4" />
           </ToolBtn>
+          {onShare && <ShareMenu onShare={onShare} />}
           {onRemove && (
             <ToolBtn label="Remove highlight" onClick={onRemove} danger>
               <Eraser className="size-4" />
@@ -111,6 +115,54 @@ export function SelectionToolbar({
       )}
     </AnimatePresence>,
     document.body,
+  )
+}
+
+export type ShareTo = 'x' | 'substack'
+
+/** Share → Post on X / Post on Substack. */
+function ShareMenu({ onShare }: { onShare: (to: ShareTo) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="relative">
+      <ToolBtn label="Share — post on X or Substack" onClick={() => setOpen((o) => !o)}>
+        <Share2 className="size-4" />
+      </ToolBtn>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="menu"
+            initial={{ opacity: 0, y: -4, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, transition: { duration: 0.1 } }}
+            transition={{ type: 'spring', stiffness: 600, damping: 36 }}
+            className="absolute right-0 top-[calc(100%+10px)] w-48 rounded-md border border-hairline bg-canvas-elevated p-1 shadow-floating"
+            onPointerDown={(e) => e.preventDefault()}
+          >
+            <ShareItem label="Post on X" onClick={() => (setOpen(false), onShare('x'))}>
+              <XMark className="size-3.5" />
+            </ShareItem>
+            <ShareItem label="Post on Substack" onClick={() => (setOpen(false), onShare('substack'))}>
+              <SubstackMark className="size-3.5 text-[#ff6719]" />
+            </ShareItem>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function ShareItem({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      role="menuitem"
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={onClick}
+      className="flex h-9 w-full items-center gap-2.5 rounded-sm px-2.5 text-left text-body-md text-ink transition-colors hover:bg-hairline-soft"
+    >
+      <span className="grid size-5 place-items-center">{children}</span>
+      {label}
+    </button>
   )
 }
 
@@ -129,7 +181,7 @@ function ToolBtn({ label, onClick, children, danger }: { label: string; onClick:
 }
 
 export function HighlightPopover({
-  highlight, anchor, focusNote, onClose, onColor, onNote, onDelete, onCopy,
+  highlight, anchor, focusNote, onClose, onColor, onNote, onDelete, onCopy, onShare,
 }: {
   highlight: Highlight | null
   anchor: Anchor | null
@@ -139,15 +191,18 @@ export function HighlightPopover({
   onNote: (note: string) => void
   onDelete: () => void
   onCopy: () => void
+  onShare?: (to: ShareTo) => void
 }) {
   const [note, setNote] = useState('')
   const [editing, setEditing] = useState(false)
+  const [sharing, setSharing] = useState(false)
   const panel = useRef<HTMLDivElement>(null)
-  const pos = usePlacement(anchor, { w: 320, h: editing || highlight?.note ? 188 : 52 })
+  const pos = usePlacement(anchor, { w: 320, h: (editing || highlight?.note ? 188 : 52) + (sharing ? 52 : 0) })
 
   useEffect(() => {
     setNote(highlight?.note ?? '')
     setEditing(!!focusNote || !!highlight?.note)
+    setSharing(false)
   }, [highlight?.id, focusNote]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
@@ -193,10 +248,31 @@ export function HighlightPopover({
             <ToolBtn label="Copy text" onClick={onCopy}>
               <Copy className="size-4" />
             </ToolBtn>
+            {onShare && (
+              <ToolBtn label="Share — post on X or Substack" onClick={() => setSharing((v) => !v)}>
+                <Share2 className={`size-4 ${sharing ? 'text-link' : ''}`} />
+              </ToolBtn>
+            )}
             <ToolBtn label="Delete highlight" onClick={onDelete} danger>
               <Trash2 className="size-4" />
             </ToolBtn>
           </div>
+          {sharing && onShare && (
+            <div className="flex gap-2 border-t border-hairline px-3 py-2.5">
+              <button
+                onClick={() => (setSharing(false), onShare('x'))}
+                className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-sm border border-hairline text-body-sm font-medium text-ink hover:bg-hairline-soft"
+              >
+                <XMark className="size-3.5" /> Post on X
+              </button>
+              <button
+                onClick={() => (setSharing(false), onShare('substack'))}
+                className="inline-flex h-8 flex-1 items-center justify-center gap-2 rounded-sm border border-hairline text-body-sm font-medium text-ink hover:bg-hairline-soft"
+              >
+                <SubstackMark className="size-3.5 text-[#ff6719]" /> Substack
+              </button>
+            </div>
+          )}
           <AnimatePresence initial={false}>
             {editing && (
               <motion.div
