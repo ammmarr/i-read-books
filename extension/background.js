@@ -50,6 +50,31 @@ function noteVisit(v) {
   })
 }
 
+/** Reads from the cloud folded into the ones here. The bigger count wins; one still on its way up is left alone. */
+function mergeCloud(visits, pending, cloud) {
+  const out = { ...visits }
+  for (const r of cloud) {
+    if (pending[r.id]) continue
+    if (r.deleted) {
+      delete out[r.id]
+      continue
+    }
+    const v = out[r.id]
+    out[r.id] = {
+      ...v,
+      id: r.id,
+      url: r.url ?? v?.url,
+      title: r.title ?? v?.title,
+      publication: r.publication ?? v?.publication,
+      author: r.author ?? v?.author,
+      start: r.start_ms ?? v?.start,
+      end: Math.max(r.end_ms ?? r.start_ms ?? 0, v?.end ?? 0),
+      seconds: Math.max(r.seconds ?? 0, v?.seconds ?? 0),
+    }
+  }
+  return out
+}
+
 // ── Your I read account (Supabase auth, no library needed) ───────────────
 async function auth(path, body) {
   const res = await fetch(`${CONFIG.supabaseUrl}/auth/v1/token?grant_type=${path}`, {
@@ -138,6 +163,16 @@ async function doSync() {
         const { pending: now = {} } = await get('pending')
         for (const [id, ver] of Object.entries(sent)) if (now[id] === ver) delete now[id]
         await set({ pending: now })
+      })
+    }
+    // And back: what I read has (counted here before a reinstall, or on another computer), so the
+    // minutes shown here are the real total — and a read removed in the app goes here too.
+    const back = await rest(`irb_web_reads?select=id,url,title,publication,author,start_ms,end_ms,seconds,deleted&start_ms=gte.${startOfDay() - KEEP_DAYS * 864e5}`)
+    if (back?.ok) {
+      const cloud = await back.json()
+      await serial(async () => {
+        const { visits = {}, pending = {} } = await get(['visits', 'pending'])
+        await set({ visits: mergeCloud(visits, pending, cloud) })
       })
     }
     // Highlights and notes made on Substack pages (annotate.js).
