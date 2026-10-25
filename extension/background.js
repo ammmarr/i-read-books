@@ -58,7 +58,7 @@ async function auth(path, body) {
     body: JSON.stringify(body),
   })
   const data = await res.json().catch(() => ({}))
-  if (!res.ok) throw new Error(data.error_description || data.msg || data.error || `Sign-in failed (${res.status})`)
+  if (!res.ok) throw Object.assign(new Error(data.error_description || data.msg || data.error || `Sign-in failed (${res.status})`), { status: res.status })
   return { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: data.expires_at, email: data.user?.email }
 }
 
@@ -69,17 +69,25 @@ async function signIn(email, password) {
 }
 
 /** A valid access token — renewed first if it's (nearly) expired. Null when signed out. */
+let renewing = null
 async function token(force = false) {
   const { auth: a } = await get('auth')
   if (!a) return null
   if (!force && a.expires_at * 1000 - Date.now() > 60_000) return a.access_token
+  // One renewal at a time: two at once would both spend the same refresh token.
+  renewing ??= renew(a).finally(() => (renewing = null))
+  return renewing
+}
+
+async function renew(a) {
   try {
     const fresh = await auth('refresh_token', { refresh_token: a.refresh_token })
     await set({ auth: { ...a, ...fresh, email: fresh.email ?? a.email } })
     return fresh.access_token
   } catch (e) {
-    // The account no longer accepts this sign-in (password changed, signed out everywhere…).
-    if (navigator.onLine) await set({ auth: null, status: { lastSyncAt: null, error: 'Signed out — sign in again to keep counting.' } })
+    // Only when the account really refused it (password changed, signed out everywhere…). A dropped
+    // connection or a server error just means try again on the next sync, never "signed out".
+    if (e.status === 400 || e.status === 401) await set({ auth: null, status: { lastSyncAt: null, error: 'Signed out — sign in again to keep counting.' } })
     throw e
   }
 }
@@ -211,14 +219,16 @@ async function annotationsFor(url) {
 
 /** The little tracker on the page: this article's time, and today's against the goal. */
 async function pageStatus(url) {
-  const { visits = {}, goal = DEFAULT_GOAL, auth: a } = await get(['visits', 'goal', 'auth'])
+  const { visits = {}, goal = DEFAULT_GOAL, auth: a, pending = {}, status = {} } = await get(['visits', 'goal', 'auth', 'pending', 'status'])
   const today = startOfDay()
   let todaySecs = 0, articleSecs = 0
   for (const v of Object.values(visits)) {
     if (v.start >= today) todaySecs += v.seconds
     if (v.url === url) articleSecs += v.seconds
   }
-  return { signedIn: !!a, todaySecs, articleSecs, goal, appUrl: CONFIG.appUrl }
+  // Whether it has really reached I read, for the panel's footer.
+  const sync = { lastSyncAt: status.lastSyncAt ?? null, error: status.error ?? null, waiting: Object.keys(pending).length }
+  return { signedIn: !!a, todaySecs, articleSecs, goal, appUrl: CONFIG.appUrl, sync }
 }
 
 // ── Posting a Substack Note you shared from I read ───────────────────────
@@ -331,6 +341,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
       (e) => reply({ ok: false, error: String(e?.message ?? e) }),
     )
     return true
+  }
+  if (msg?.type === 'openSignIn') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?welcome=1') })
+    return false
   }
   if (msg?.type === 'syncNow') {
     sync().then(() => reply({ ok: true }))

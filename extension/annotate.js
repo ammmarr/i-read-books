@@ -252,6 +252,10 @@
     .mode { display: none; align-items: center; gap: 5px; margin-left: 2px; padding: 2px 8px 2px 6px; border-radius: 999px; background: rgba(255,103,25,.18); color: #ffb48a; font-size: 11.5px; font-weight: 500; }
     .mode i { width: 7px; height: 7px; border-radius: 999px; background: var(--sub); }
     .on .mode { display: inline-flex; }
+    .nosync { display: none; margin-left: 2px; padding: 2px 8px; border-radius: 999px; background: rgba(245,158,11,.2); color: #fbbf24; font-size: 11.5px; font-weight: 500; }
+    .signedout .nosync { display: inline-flex; }
+    .signin { margin-left: auto; height: 26px; padding: 0 10px; border-radius: 6px; background: #d97706; color: #fff; font-size: 12px; font-weight: 500; }
+    .signin:hover { background: #b45309; }
     .panel { position: fixed; right: 18px; bottom: 66px; width: 330px; max-height: min(560px, calc(100vh - 100px)); display: flex; flex-direction: column;
       background: var(--bg); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 18px 48px rgba(0,0,0,.18);
       opacity: 0; transform: translateY(8px) scale(.98); transform-origin: bottom right; pointer-events: none; transition: opacity .16s ease, transform .2s cubic-bezier(.16,1,.3,1); }
@@ -292,6 +296,8 @@
     .foot { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-top: 1px solid var(--line); font-size: 12px; }
     .foot a { color: var(--link); text-decoration: none; font-weight: 500; }
     .foot a:hover { text-decoration: underline; }
+    .foot .sync { margin-left: auto; text-align: right; }
+    .foot .sync.warn { color: #b45309; }
     .tools { position: fixed; display: none; align-items: center; gap: 2px; height: 40px; padding: 0 6px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0,0,0,.16); }
     .tools.show { display: flex; }
     .sw { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 999px; }
@@ -340,11 +346,12 @@
     <svg class="ring" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10.5" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="3"/><circle class="arc" cx="13" cy="13" r="10.5" fill="none" stroke="#ff6719" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 66"/></svg>
     <span class="t">0 min</span><span class="s">this article</span>
     <span class="mode"><i></i>Highlighting</span>
+    <span class="nosync" title="Not signed in: this time isn’t reaching I read">Not syncing</span>
   </div>
   <div class="panel" role="dialog" aria-label="I read on this page">
     <div class="head">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>
-      <span class="brand">I read</span><span class="muted" style="margin-left:auto" data-k="signed"></span>
+      <span class="brand">I read</span><button class="signin" data-k="signed" hidden>Sign in to sync</button>
     </div>
     <div class="stats">
       <div class="eyebrow">This article</div>
@@ -368,7 +375,7 @@
         <ul data-k="list"></ul>
       </div>
     </div>
-    <div class="foot"><a data-k="open" href="#" target="_blank" rel="noopener">Open I read</a><span class="muted" style="margin-left:auto">Synced to your library</span></div>
+    <div class="foot"><a data-k="open" href="#" target="_blank" rel="noopener">Open I read</a><span class="muted sync" data-k="sync"></span></div>
   </div>
   <div class="tools" role="toolbar" aria-label="Highlight with I read" data-k="tools"></div>
   <div class="pop" role="dialog" aria-label="Highlight" data-k="pop">
@@ -381,6 +388,10 @@
   const panel = ui.querySelector('.panel')
 
   const mins = (s) => Math.floor(s / 60)
+  const ago = (t) => {
+    const m = Math.round((Date.now() - t) / 60_000)
+    return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : `${Math.round(m / 60)} h ago`
+  }
   function renderPill() {
     const goal = status.goal || 0
     const frac = goal ? Math.min(1, status.todaySecs / (goal * 60)) : 0
@@ -399,7 +410,22 @@
     $('today').textContent = goal ? `${mins(status.todaySecs)} of ${goal} min` : `${mins(status.todaySecs)} min`
     $('todaybar').firstElementChild.style.width = `${frac * 100}%`
     $('todaybar').classList.toggle('done', !!goal && status.todaySecs >= goal * 60)
-    $('signed').textContent = status.signedIn ? '' : 'Sign in from the I read icon'
+    // Signed out, it still counts here but nothing reaches I read: say so where you look.
+    $('signed').hidden = status.signedIn
+    pill.classList.toggle('signedout', !status.signedIn)
+    // Whether this has really reached I read (not just counted here).
+    const sy = status.sync ?? {}
+    const sync = $('sync')
+    sync.classList.toggle('warn', !status.signedIn || !!sy.error)
+    sync.textContent = !status.signedIn
+      ? 'Not signed in, so not in I read yet'
+      : sy.error
+        ? sy.error
+        : sy.waiting
+          ? 'Waiting to sync to I read…'
+          : sy.lastSyncAt
+            ? `In I read · synced ${ago(sy.lastSyncAt)}`
+            : 'Not synced to I read yet'
     $('open').href = status.appUrl || '#'
     $('switch').setAttribute('aria-checked', String(mode))
   }
@@ -476,6 +502,7 @@
   pill.addEventListener('click', () => (panel.classList.contains('open') ? panel.classList.remove('open') : open()))
   $('notes').addEventListener('blur', closeSoon)
   $('switch').addEventListener('click', () => setMode(!mode))
+  $('signed').addEventListener('click', () => send({ type: 'openSignIn' }))
 
   // Notes autosave.
   let noteT
