@@ -356,10 +356,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
 chrome.alarms.create('sync', { periodInMinutes: 1 })
 chrome.alarms.onAlarm.addListener((a) => a.name === 'sync' && sync())
 chrome.runtime.onStartup.addListener(() => sync())
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   updateBadge()
   // First install: open the popup's sign-in in a tab, so it's obvious what to do.
   chrome.storage.local.get('auth').then(({ auth: a }) => !a && chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?welcome=1') }))
+  // Pages already open have no copy yet (install) or the old one, which can't save anything any more
+  // (update): put the new one in, so reading counts without reloading them. Off Substack both stop at once.
+  if (reason !== 'install' && reason !== 'update') return
+  const tabs = await chrome.tabs.query({ url: 'https://*/*' }).catch(() => [])
+  for (const t of tabs) {
+    if (t.id == null || t.discarded) continue
+    chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['content.js', 'annotate.js'] }).catch(() => {})
+  }
 })
 self.addEventListener('online', () => sync())
 updateBadge()

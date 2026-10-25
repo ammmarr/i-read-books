@@ -9,13 +9,25 @@
   // Filled in by scripts/make-extension.mjs: the one site allowed to talk to the extension.
   const APP_ORIGIN = '__APP_ORIGIN__'
 
+  // After an update, a page already open keeps this old copy, cut off from the extension (it can't
+  // save anything); background.js puts the new one in beside it, and this one stands down.
+  const me = {}
+  globalThis.__irbContent = me
+  const alive = () => {
+    try {
+      return !!chrome.runtime?.id && globalThis.__irbContent === me
+    } catch {
+      return false
+    }
+  }
+
   // ── On I read: pass "post this Note" to the extension, and say we're here ──
   if (location.origin === APP_ORIGIN) {
     const version = chrome.runtime.getManifest().version
     const say = (o) => window.postMessage({ source: 'i-read-ext', ...o }, location.origin)
     say({ type: 'hello', version })
     addEventListener('message', (e) => {
-      if (e.source !== window || e.origin !== location.origin || e.data?.source !== 'i-read') return
+      if (!alive() || e.source !== window || e.origin !== location.origin || e.data?.source !== 'i-read') return
       if (e.data.type === 'ping') say({ type: 'hello', version })
       if (e.data.type === 'substackNote') {
         const id = e.data.id
@@ -205,7 +217,11 @@
     }
   }
 
-  setInterval(() => {
+  const clock = setInterval(() => {
+    if (!alive()) {
+      clearInterval(clock)
+      return report() // replaced by a newer copy: hand over what's counted (cut off, this just fails quietly)
+    }
     // Moved to another page (no reload): that's a new visit.
     if (visit && visit.url !== here()) {
       report()

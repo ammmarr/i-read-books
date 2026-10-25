@@ -9,6 +9,18 @@
   if (!globalThis.__irbSubstack || window.top !== window) return
   /** The reading clock (content.js): "Still reading?" and paused. */
   const R = globalThis.__irbReading
+  // After an update, a page already open keeps this old copy, cut off from the extension; the new one
+  // is put in beside it (background.js) and this one stands down (see `stop`).
+  const me = {}
+  globalThis.__irbAnnotate = me
+  let dead = false
+  const alive = () => {
+    try {
+      return !!chrome.runtime?.id && globalThis.__irbAnnotate === me
+    } catch {
+      return false
+    }
+  }
 
   const COLORS = [
     { key: 'yellow', swatch: '#fcd34d', mark: 'rgba(253, 224, 71, 0.55)', label: 'Yellow' },
@@ -40,6 +52,8 @@
     mark.irb-hl.irb-flash { box-shadow: 0 0 0 3px rgba(0, 112, 243, .45); }
     html.irb-mode .body.markup ::selection, html.irb-mode .available-content ::selection { background: rgba(255, 103, 25, .28); }
   `
+  document.getElementById('irb-style')?.remove()
+  style.id = 'irb-style'
   document.head.append(style)
 
   /** Text nodes of the post, and its text with spaces squeezed, mapped back to them. */
@@ -234,6 +248,7 @@
   const host = document.createElement('div')
   host.id = 'irb-host'
   host.style.cssText = 'all: initial; position: fixed; z-index: 2147483000; inset: auto 0 0 auto;'
+  document.querySelectorAll('#irb-host').forEach((el) => el.remove()) // an older copy's, from before an update
   document.documentElement.append(host)
   const ui = host.attachShadow({ mode: 'open' })
   ui.innerHTML = `
@@ -570,6 +585,7 @@
   addEventListener(
     'keydown',
     (e) => {
+      if (dead) return
       if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyH') {
         e.preventDefault()
         e.stopImmediatePropagation()
@@ -595,7 +611,7 @@
     addEventListener(
       type,
       (e) => {
-        if (!mode || ours(e) || !inBody(e.target)) return
+        if (dead || !mode || ours(e) || !inBody(e.target)) return
         e.stopImmediatePropagation()
         if (type === 'mouseup' || type === 'touchend') setTimeout(showTools, 0)
       },
@@ -605,7 +621,7 @@
   addEventListener(
     'selectionchange',
     (e) => {
-      if (mode && selection()) e.stopImmediatePropagation()
+      if (!dead && mode && selection()) e.stopImmediatePropagation()
     },
     true,
   )
@@ -724,7 +740,7 @@
   addEventListener(
     'click',
     (e) => {
-      if (ours(e)) return
+      if (dead || ours(e)) return
       const m = e.target instanceof Element ? e.target.closest('mark.irb-hl') : null
       if (m && getSelection()?.isCollapsed !== false) {
         const a = anns.find((x) => x.id === m.dataset.irbId)
@@ -745,14 +761,24 @@
 
   // ── Go ─────────────────────────────────────────────────────────────────────
   load()
-  setInterval(refreshStatus, 15_000)
-  // Substack's own reader changes post without reloading: start over for the new one.
-  setInterval(() => {
-    if (here() === url) return
-    for (const a of highlights()) unwrap(a.id)
-    anns = []
-    hideTools()
-    hidePop()
-    load()
-  }, 1000)
+  const timers = [
+    setInterval(refreshStatus, 15_000),
+    setInterval(() => {
+      if (!alive()) return stop()
+      // Substack's own reader changes post without reloading: start over for the new one.
+      if (here() === url) return
+      for (const a of highlights()) unwrap(a.id)
+      anns = []
+      hideTools()
+      hidePop()
+      load()
+    }, 1000),
+  ]
+  /** Cut off by an update (or replaced by the new copy): leave the page to it. Marks stay; it reuses them. */
+  function stop() {
+    dead = true
+    timers.forEach(clearInterval)
+    host.remove()
+    style.remove()
+  }
 })()
