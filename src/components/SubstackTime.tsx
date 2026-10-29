@@ -8,21 +8,37 @@ import { useExtension } from '../lib/share'
 import { SubstackMark, XMark } from './ShareQuote'
 
 /**
- * Settings → Daily goals: books and Substack each have a goal; the overall
- * goal is simply the two together.
+ * Settings → Daily goals: the overall goal is its own number, filled by any
+ * mix of books and Substack; books and Substack each have a goal too.
  */
 export function DailyGoals() {
   const s = useSettings()
   const g = goalsOf(s)
+  const setTotal = (m: number) => updateSettings({ totalGoalMinutes: Math.max(5, Math.min(600, m)) })
   return (
     <div>
-      <div className="flex items-baseline gap-2">
-        <motion.span key={g.overall} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
-          {g.overall}
-        </motion.span>
-        <span className="text-body-md text-mute">min a day overall</span>
+      <div className="flex items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <motion.span key={g.overall} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
+            {g.overall}
+          </motion.span>
+          <span className="text-body-md text-mute">min a day in all</span>
+        </div>
+        <Step minus label="Less in all" disabled={g.overall <= 5} onClick={() => setTotal(g.overall - 5)} />
+        <Step label="More in all" onClick={() => setTotal(g.overall + 5)} />
       </div>
-      <p className="mt-1 text-body-sm text-mute">Books and Substack together — set each below.</p>
+      <p className="mt-1 text-body-sm text-mute">
+        Any mix of books and Substack counts toward it.
+        {g.ownTotal && g.sum !== g.overall && (
+          <>
+            {' '}
+            Your books and Substack goals add up to {g.sum} min ·{' '}
+            <button onClick={() => updateSettings({ totalGoalMinutes: null })} className="font-medium text-link hover:underline">
+              Use {g.sum}
+            </button>
+          </>
+        )}
+      </p>
       <div className="mt-5 divide-y divide-hairline rounded-md border border-hairline">
         <GoalRow
           icon={<BookOpen className="size-4" />}
@@ -57,17 +73,22 @@ function GoalRow({ icon, tone, label, hint, value, min, onChange }: { icon: Reac
         <div className="text-body-md text-ink">{label}</div>
         {hint && <div className="text-body-sm text-mute">{hint}</div>}
       </div>
-      <button onClick={() => set(value - 5)} disabled={value <= min} aria-label={`Less ${label.toLowerCase()}`} className="grid size-8 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft disabled:opacity-40">
-        <Minus className="size-3.5" />
-      </button>
+      <Step minus label={`Less ${label.toLowerCase()}`} disabled={value <= min} onClick={() => set(value - 5)} />
       <div className="w-[72px] text-center">
         <span className="text-heading-md tabular text-ink">{value}</span>
         <span className="ml-1 text-body-sm text-mute">min</span>
       </div>
-      <button onClick={() => set(value + 5)} aria-label={`More ${label.toLowerCase()}`} className="grid size-8 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft">
-        <Plus className="size-3.5" />
-      </button>
+      <Step label={`More ${label.toLowerCase()}`} onClick={() => set(value + 5)} />
     </div>
+  )
+}
+
+/** A round − / + button for a goal. */
+function Step({ minus, label, disabled, onClick }: { minus?: boolean; label: string; disabled?: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} disabled={disabled} aria-label={label} className="grid size-8 shrink-0 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft disabled:opacity-40">
+      {minus ? <Minus className="size-3.5" /> : <Plus className="size-3.5" />}
+    </button>
   )
 }
 

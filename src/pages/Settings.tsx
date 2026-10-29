@@ -49,7 +49,7 @@ export default function SettingsPage() {
         </Group>
       )}
 
-      <Group title="Daily goals" desc="Your overall goal is your books and Substack goals together; each also shows its own progress. Your streak counts any day with at least a minute of reading — books or Substack.">
+      <Group title="Daily goals" desc="Your overall goal is its own number: any mix of books and Substack fills it. Books and Substack also each have a goal and show their own progress. Your streak counts any day with at least a minute of reading — books or Substack.">
         <DailyGoals />
       </Group>
 

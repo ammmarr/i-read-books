@@ -330,8 +330,8 @@ function PickSomething({ books }: { books: Book[] }) {
 }
 
 /**
- * Today against your goals: the ring is the overall goal (books + Substack),
- * filled in each one's colour; below, each goal on its own.
+ * Today against your goals: the ring is the overall goal (any mix of books and
+ * Substack), filled in each one's colour; below, each goal on its own.
  */
 function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
   const g = goalsOf(useSettings())

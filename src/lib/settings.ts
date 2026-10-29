@@ -6,7 +6,7 @@ export type ZoomMode = 'auto' | 'width' | 'page' | 'custom'
 
 export interface Settings {
   theme: ThemePref
-  /** Daily minutes of books. (The overall goal is this plus Substack's — see goalsOf.) */
+  /** Daily minutes of books. (The overall goal is its own — see goalsOf.) */
   dailyGoalMinutes: number
   pageTheme: PageTheme
   keepAwake: boolean
@@ -20,6 +20,8 @@ export interface Settings {
   recapsOffBooks: string[]
   /** Daily minutes on Substack (counted by the Chrome extension); 0 = no Substack goal. */
   substackGoalMinutes: number
+  /** Daily minutes of reading in all, any mix of books and Substack; null = books + Substack (until you set it). */
+  totalGoalMinutes: number | null
   /** Night Shift (warm screen) — this device only. See lib/nightShift.ts. */
   nightShift: 'off' | 'on' | 'scheduled'
   /** 0 (a hint) – 1 (deep amber). */
@@ -42,6 +44,7 @@ const DEFAULTS: Settings = {
   recapSections: true,
   recapsOffBooks: [],
   substackGoalMinutes: 30,
+  totalGoalMinutes: null,
   nightShift: 'off',
   nightShiftWarmth: 0.45,
   nightShiftFrom: '21:00',
@@ -49,11 +52,15 @@ const DEFAULTS: Settings = {
   nightShiftOverride: null,
 }
 
-/** Your daily goals: books, Substack, and overall (their sum). */
-export function goalsOf(s: Pick<Settings, 'dailyGoalMinutes' | 'substackGoalMinutes'>) {
+/**
+ * Your daily goals: books, Substack, and overall. Overall is its own number, filled by any mix of the
+ * two; until you set it, it's books + Substack.
+ */
+export function goalsOf(s: Pick<Settings, 'dailyGoalMinutes' | 'substackGoalMinutes' | 'totalGoalMinutes'>) {
   const books = s.dailyGoalMinutes
   const substack = s.substackGoalMinutes
-  return { books, substack, overall: books + substack }
+  const sum = books + substack
+  return { books, substack, overall: s.totalGoalMinutes ?? sum, sum, ownTotal: s.totalGoalMinutes != null }
 }
 
 const KEY = 'irb-settings'
@@ -76,7 +83,7 @@ export function getSettings() {
 }
 
 /** Settings that follow you across devices (theme stays per-device). */
-export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapSections', 'recapsOffBooks', 'substackGoalMinutes']
+export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapSections', 'recapsOffBooks', 'substackGoalMinutes', 'totalGoalMinutes']
 const META_KEY = 'irb-settings-meta'
 
 export function getSettingsMeta(): { updatedAt: number; dirty: boolean } {
