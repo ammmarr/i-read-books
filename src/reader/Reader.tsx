@@ -33,7 +33,7 @@ import { useImporter } from '../components/Importer'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { downloadBookFile, freshPull, noteOwnPosition, syncNow } from '../lib/sync'
 import { cloudEnabled, getAuthSession } from '../lib/supabase'
-import { isNative, keepScreenOn, setImmersive } from '../lib/native'
+import { isNative, keepScreenOn, setImmersive, setSystemBarsDark } from '../lib/native'
 import {
   chapterForRecap, chaptersOf, coverage, kindOf, lastFinishedChapter, markRecapDue, MIN_RECAP_PAGES, pagesChapter, RECAP_COVERAGE, recapId,
   sectionForRecap, sectionsOf, setBookRecaps, setSectionRecaps, useRecapPrefs, type Chapter,
@@ -1657,6 +1657,12 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
 
   // ── Render ────────────────────────────────────────────────────────────
   const pageTheme = settings.pageTheme === 'auto' ? (dark ? 'night' : 'paper') : settings.pageTheme
+  // Android's status bar sits over the top bar, or over the pages once it slides away: light icons
+  // on a dark one (night pages in a light app too), dark on a light one. Back to the app's on leaving.
+  useEffect(() => {
+    setSystemBarsDark(chrome ? dark : dark || pageTheme === 'night')
+  }, [chrome, dark, pageTheme])
+  useEffect(() => () => setSystemBarsDark(dark), [dark])
   const zoomPercent = Math.round((scale / PT_TO_PX) * 100)
   const progress = book.pageCount > 1 ? currentPage / (book.pageCount - 1) : 1
   const hlByPage = useMemo(() => {

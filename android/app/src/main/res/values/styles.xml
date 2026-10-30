@@ -13,6 +13,8 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- Behind the page (only ever seen before it draws): black like the boot screen, never white. -->
+        <item name="android:windowBackground">@color/ic_launcher_background</item>
     </style>
 
 

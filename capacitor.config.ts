@@ -10,6 +10,11 @@ const config: CapacitorConfig = {
     allowMixedContent: false,
   },
   plugins: {
+    // The status bar strip is drawn by MainActivity (edge to edge on every WebView, insets as CSS
+    // variables); Capacitor's own handling padded it with a white window on older WebViews.
+    SystemBars: {
+      insetsHandling: 'disable',
+    },
     // In-app updates: new web versions download from the website and switch
     // in (src/lib/update.ts). If one fails to start, the app falls back to
     // the version it was installed with.
