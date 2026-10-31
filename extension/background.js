@@ -4,13 +4,15 @@
 import { CONFIG } from './config.js'
 
 const KEEP_DAYS = 14
-const DEFAULT_GOAL = 30
+/** I read's own defaults (books 20 + the old Substack 30), until the first sync brings yours. */
+const DEFAULT_GOAL = 50
 
 // ── Storage (chrome.storage.local) ───────────────────────────────────────
 //   visits  { [id]: { id, url, title, publication, author, start, end, seconds } }  the last two weeks
 //   pending { [id]: version }   changed since the cloud last had them
 //   auth    { access_token, refresh_token, expires_at, email }
-//   goal    minutes a day, from your I read settings
+//   goal    your overall daily goal in minutes (books and Substack together), from your I read settings
+//   books   { day, seconds }   what you've read in books today, from I read
 //   status  { lastSyncAt, error }
 const get = (keys) => chrome.storage.local.get(keys)
 const set = (o) => chrome.storage.local.set(o)
@@ -25,15 +27,21 @@ const startOfDay = (t = Date.now()) => {
   return d.getTime()
 }
 
+/** Today's reading in seconds: Substack (counted here, and synced back from I read) and books (from I read). */
+function todayOf(visits, books) {
+  const today = startOfDay()
+  const substack = Object.values(visits).reduce((a, v) => a + (v.start >= today ? v.seconds : 0), 0)
+  return { substack, books: books?.day === today ? books.seconds : 0 }
+}
+
 // ── The icon: today's minutes, green once the goal is reached ──────────────
 async function updateBadge() {
-  const { visits = {}, goal = DEFAULT_GOAL, auth } = await get(['visits', 'goal', 'auth'])
-  const today = startOfDay()
-  const secs = Object.values(visits).reduce((a, v) => a + (v.start >= today ? v.seconds : 0), 0)
-  const mins = Math.floor(secs / 60)
+  const { visits = {}, goal = DEFAULT_GOAL, auth, books } = await get(['visits', 'goal', 'auth', 'books'])
+  const t = todayOf(visits, books)
+  const mins = Math.floor((t.substack + t.books) / 60)
   await chrome.action.setBadgeText({ text: !auth ? '!' : mins ? String(mins) : '' })
   await chrome.action.setBadgeBackgroundColor({ color: !auth ? '#d97706' : mins >= goal ? '#16a34a' : '#0070f3' })
-  await chrome.action.setTitle({ title: !auth ? 'I read · sign in to count your Substack reading' : `I read · ${mins} of ${goal} min on Substack today` })
+  await chrome.action.setTitle({ title: !auth ? 'I read · sign in to count your Substack reading' : `I read · ${mins} of ${goal} min read today` })
 }
 
 // ── Pages report their reading ─────────────────────────────────────────────
@@ -192,12 +200,20 @@ async function doSync() {
         await set({ annPending: now })
       })
     }
-    // Your daily Substack goal, from I read's settings.
+    // Your overall daily goal (books and Substack together — Substack has none of its own) from I read's
+    // settings, and today's books, so the minutes here are the whole day's reading.
     const res = await rest('irb_profiles?select=settings')
     if (res?.ok) {
       const [p] = await res.json()
-      const goal = Number(p?.settings?.substackGoalMinutes)
+      const s = p?.settings ?? {}
+      const goal = Number(s.totalGoalMinutes ?? Number(s.dailyGoalMinutes ?? 20) + Number(s.substackGoalMinutes ?? 30))
       if (goal >= 0 && Number.isFinite(goal)) await set({ goal })
+    }
+    const day = startOfDay()
+    const read = await rest(`irb_sessions?select=seconds&start_ms=gte.${day}&deleted=is.false`)
+    if (read?.ok) {
+      const rows = await read.json()
+      await set({ books: { day, seconds: rows.reduce((a, r) => a + (r.seconds ?? 0), 0) } })
     }
     await set({ status: { lastSyncAt: Date.now(), error: null } })
   } catch (e) {
@@ -252,15 +268,13 @@ async function annotationsFor(url) {
   return Object.values(annotations).filter((a) => a.url === url && !a.deleted)
 }
 
-/** The little tracker on the page: this article's time, and today's against the goal. */
+/** The little tracker on the page: this article's time, and today's reading (books too) against the goal. */
 async function pageStatus(url) {
-  const { visits = {}, goal = DEFAULT_GOAL, auth: a, pending = {}, status = {} } = await get(['visits', 'goal', 'auth', 'pending', 'status'])
-  const today = startOfDay()
-  let todaySecs = 0, articleSecs = 0
-  for (const v of Object.values(visits)) {
-    if (v.start >= today) todaySecs += v.seconds
-    if (v.url === url) articleSecs += v.seconds
-  }
+  const { visits = {}, goal = DEFAULT_GOAL, auth: a, pending = {}, status = {}, books } = await get(['visits', 'goal', 'auth', 'pending', 'status', 'books'])
+  const t = todayOf(visits, books)
+  const todaySecs = t.substack + t.books
+  let articleSecs = 0
+  for (const v of Object.values(visits)) if (v.url === url) articleSecs += v.seconds
   // Whether it has really reached I read, for the panel's footer.
   const sync = { lastSyncAt: status.lastSyncAt ?? null, error: status.error ?? null, waiting: Object.keys(pending).length }
   return { signedIn: !!a, todaySecs, articleSecs, goal, appUrl: CONFIG.appUrl, sync }

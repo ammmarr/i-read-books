@@ -17,7 +17,7 @@ if (new URLSearchParams(location.search).has('welcome')) document.body.classList
 $('open-app').href = CONFIG.appUrl
 
 async function render() {
-  const { auth, visits = {}, pending = {}, goal = 30, status = {} } = await chrome.storage.local.get(['auth', 'visits', 'pending', 'goal', 'status'])
+  const { auth, visits = {}, pending = {}, goal = 50, status = {}, books } = await chrome.storage.local.get(['auth', 'visits', 'pending', 'goal', 'status', 'books'])
   $('signed-out').hidden = !!auth
   $('signed-in').hidden = !auth
   $('sign-out').hidden = !auth
@@ -31,13 +31,17 @@ async function render() {
   }
 
   const today = Object.values(visits).filter((v) => v.start >= startOfDay()).sort((a, b) => b.end - a.end)
-  const secs = today.reduce((a, v) => a + v.seconds, 0)
+  // Your whole day against your one daily goal: Substack here, plus books from I read.
+  const substackSecs = today.reduce((a, v) => a + v.seconds, 0)
+  const bookSecs = books?.day === startOfDay() ? books.seconds : 0
+  const secs = substackSecs + bookSecs
   const m = Math.floor(secs / 60)
   $('mins').textContent = String(m)
   $('goal').textContent = String(goal)
   $('bar-fill').style.width = `${Math.min(100, (secs / (goal * 60)) * 100)}%`
   $('bar-fill').classList.toggle('done', m >= goal)
-  $('today-note').textContent = m >= goal ? 'Goal reached — nice.' : secs > 0 ? `${goal - m} min to your goal` : 'Open a Substack post and start reading.'
+  const note = m >= goal ? 'Goal reached — nice.' : secs > 0 ? `${goal - m} min to your goal` : 'Open a Substack post and start reading.'
+  $('today-note').textContent = secs > 0 ? `${note} · Books ${Math.floor(bookSecs / 60)} min, Substack ${Math.floor(substackSecs / 60)} min` : note
 
   const list = $('reads')
   list.replaceChildren(

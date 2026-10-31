@@ -89,7 +89,8 @@ function Dashboard({ range, source, bookSessions, webSessions, reads, books }: {
   range: RangeKey; source: Source; bookSessions: Session[]; webSessions: Session[]; reads: WebRead[]; books: Book[]
 }) {
   const g = goalsOf(useSettings())
-  const goalMinutes = source === 'all' ? g.overall : source === 'books' ? g.books : g.substack
+  // Substack has no goal of its own (it counts toward the overall one).
+  const goalMinutes = source === 'all' ? g.overall : source === 'books' ? g.books : 0
   const goalName = source === 'all' ? 'daily' : source === 'books' ? 'books' : 'Substack'
   const allSessions = useMemo(() => [...bookSessions, ...webSessions], [bookSessions, webSessions])
   const sessions = source === 'all' ? allSessions : source === 'books' ? bookSessions : webSessions

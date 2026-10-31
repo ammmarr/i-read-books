@@ -342,7 +342,7 @@ function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] 
   const met = goal > 0 && total >= goal
   // Any reading keeps the streak going — books or Substack.
   const s = streaks(dailyTotals([...sessions, ...webSessions(reads)]))
-  const showSubstack = g.substack > 0 || reads.length > 0
+  const showSubstack = reads.length > 0
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -363,7 +363,8 @@ function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] 
           </p>
           <div className="mt-3 space-y-2.5">
             <GoalLine label="Books" seconds={books} goal={g.books * 60} color="var(--color-link)" />
-            {showSubstack && <GoalLine label="Substack" seconds={substack} goal={g.substack * 60} color="var(--color-substack)" />}
+            {/* Substack has no goal of its own: just its minutes, toward the total. */}
+            {showSubstack && <GoalLine label="Substack" seconds={substack} goal={0} color="var(--color-substack)" />}
           </div>
           <p className="mt-3 flex items-center gap-1.5 text-body-sm text-mute">
             <Flame className={`size-3.5 ${s.readToday ? 'text-warning' : 'text-faint'}`} />

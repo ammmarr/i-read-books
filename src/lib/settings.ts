@@ -18,9 +18,12 @@ export interface Settings {
   recapSections: boolean
   /** Books where you said "don't ask" for recaps. */
   recapsOffBooks: string[]
-  /** Daily minutes on Substack (counted by the Chrome extension); 0 = no Substack goal. */
+  /**
+   * The old Substack goal: no longer shown or set. Only kept so a total never set by hand stays what it
+   * was (books + this) — see goalsOf.
+   */
   substackGoalMinutes: number
-  /** Daily minutes of reading in all, any mix of books and Substack; null = books + Substack (until you set it). */
+  /** Daily minutes of reading in all, any mix of books and Substack; null = books + the old Substack goal. */
   totalGoalMinutes: number | null
   /** Night Shift (warm screen) — this device only. See lib/nightShift.ts. */
   nightShift: 'off' | 'on' | 'scheduled'
@@ -53,14 +56,12 @@ const DEFAULTS: Settings = {
 }
 
 /**
- * Your daily goals: books, Substack, and overall. Overall is its own number, filled by any mix of the
- * two; until you set it, it's books + Substack.
+ * Your daily goals: overall, filled by any mix of books and Substack, and books on their own. Substack
+ * has no goal of its own. Until you set the overall goal, it's what it always was: books + the old
+ * Substack goal.
  */
 export function goalsOf(s: Pick<Settings, 'dailyGoalMinutes' | 'substackGoalMinutes' | 'totalGoalMinutes'>) {
-  const books = s.dailyGoalMinutes
-  const substack = s.substackGoalMinutes
-  const sum = books + substack
-  return { books, substack, overall: s.totalGoalMinutes ?? sum, sum, ownTotal: s.totalGoalMinutes != null }
+  return { books: s.dailyGoalMinutes, overall: s.totalGoalMinutes ?? s.dailyGoalMinutes + s.substackGoalMinutes }
 }
 
 const KEY = 'irb-settings'

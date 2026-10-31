@@ -192,7 +192,7 @@
   let url = here()
   let anns = [] // this page's highlights and notes
   let mode = false // I read's highlighting instead of Substack's
-  let status = { todaySecs: 0, articleSecs: 0, goal: 30, signedIn: true, appUrl: '' }
+  let status = { todaySecs: 0, articleSecs: 0, goal: 0, signedIn: true, appUrl: '' }
 
   const describe = () => ({
     url: here(),
@@ -371,7 +371,7 @@
     <div class="stats">
       <div class="eyebrow">This article</div>
       <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><span class="big" data-k="article">0</span><span class="muted">min read</span></div>
-      <div style="display:flex;justify-content:space-between;margin-top:12px" class="muted"><span>Substack today</span><span data-k="today">0 of 30 min</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:12px" class="muted"><span>Read today · books and Substack</span><span data-k="today">0 min</span></div>
       <div class="bar" data-k="todaybar"><b></b></div>
       <div class="state" data-k="state" hidden></div>
     </div>

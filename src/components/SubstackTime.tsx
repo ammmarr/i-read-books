@@ -8,13 +8,16 @@ import { useExtension } from '../lib/share'
 import { SubstackMark, XMark } from './ShareQuote'
 
 /**
- * Settings → Daily goals: the overall goal is its own number, filled by any
- * mix of books and Substack; books and Substack each have a goal too.
+ * Settings → Daily goals: the overall goal, filled by any mix of books and
+ * Substack, and a goal for books. Substack has no goal of its own.
  */
 export function DailyGoals() {
   const s = useSettings()
   const g = goalsOf(s)
   const setTotal = (m: number) => updateSettings({ totalGoalMinutes: Math.max(5, Math.min(600, m)) })
+  // A total never set by hand still follows books (books + the old Substack goal): pin it first, so
+  // changing books never moves it.
+  const setBooks = (m: number) => updateSettings({ dailyGoalMinutes: m, ...(s.totalGoalMinutes == null ? { totalGoalMinutes: g.overall } : {}) })
   return (
     <div>
       <div className="flex items-center gap-3">
@@ -27,42 +30,15 @@ export function DailyGoals() {
         <Step minus label="Less in all" disabled={g.overall <= 5} onClick={() => setTotal(g.overall - 5)} />
         <Step label="More in all" onClick={() => setTotal(g.overall + 5)} />
       </div>
-      <p className="mt-1 text-body-sm text-mute">
-        Any mix of books and Substack counts toward it.
-        {g.ownTotal && g.sum !== g.overall && (
-          <>
-            {' '}
-            Your books and Substack goals add up to {g.sum} min ·{' '}
-            <button onClick={() => updateSettings({ totalGoalMinutes: null })} className="font-medium text-link hover:underline">
-              Use {g.sum}
-            </button>
-          </>
-        )}
-      </p>
+      <p className="mt-1 text-body-sm text-mute">Any mix of books and Substack counts toward it.</p>
       <div className="mt-5 divide-y divide-hairline rounded-md border border-hairline">
-        <GoalRow
-          icon={<BookOpen className="size-4" />}
-          tone="var(--color-link)"
-          label="Books"
-          value={g.books}
-          min={5}
-          onChange={(m) => updateSettings({ dailyGoalMinutes: m })}
-        />
-        <GoalRow
-          icon={<SubstackMark className="size-3.5" />}
-          tone="var(--color-substack)"
-          label="Substack"
-          hint={g.substack === 0 ? 'No Substack goal' : undefined}
-          value={g.substack}
-          min={0}
-          onChange={(m) => updateSettings({ substackGoalMinutes: m })}
-        />
+        <GoalRow icon={<BookOpen className="size-4" />} tone="var(--color-link)" label="Books" value={g.books} min={5} onChange={setBooks} />
       </div>
     </div>
   )
 }
 
-function GoalRow({ icon, tone, label, hint, value, min, onChange }: { icon: React.ReactNode; tone: string; label: string; hint?: string; value: number; min: number; onChange: (m: number) => void }) {
+function GoalRow({ icon, tone, label, value, min, onChange }: { icon: React.ReactNode; tone: string; label: string; value: number; min: number; onChange: (m: number) => void }) {
   const set = (m: number) => onChange(Math.max(min, Math.min(240, m)))
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -71,7 +47,6 @@ function GoalRow({ icon, tone, label, hint, value, min, onChange }: { icon: Reac
       </span>
       <div className="min-w-0 flex-1">
         <div className="text-body-md text-ink">{label}</div>
-        {hint && <div className="text-body-sm text-mute">{hint}</div>}
       </div>
       <Step minus label={`Less ${label.toLowerCase()}`} disabled={value <= min} onClick={() => set(value - 5)} />
       <div className="w-[72px] text-center">
