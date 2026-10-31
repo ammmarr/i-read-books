@@ -98,7 +98,10 @@ export interface Highlight extends Synced {
   color: HighlightColor
   text: string
   note?: string
+  /** PDF: where it is on the page. (EPUB: empty — see `cfi`.) */
   rects: NormRect[]
+  /** EPUB: the exact passage, as an EPUB CFI range. `page` is then the location it starts in. */
+  cfi?: string
   createdAt: number
 }
 

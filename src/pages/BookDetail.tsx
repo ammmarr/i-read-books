@@ -68,7 +68,7 @@ export default function BookDetail() {
   const st = bookStats(book, sessions, overall)
   const p = bookProgress(book)
   const unread = unreadAhead(book)
-  const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || a.rects[0][1] - b.rects[0][1])
+  const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || (a.rects[0]?.[1] ?? 0) - (b.rects[0]?.[1] ?? 0) || a.createdAt - b.createdAt)
 
   // Opens the reader at the note; where you left off reading stays put
   // ("Back to page N" there takes you back).

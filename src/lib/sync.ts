@@ -80,7 +80,7 @@ function toRemote(table: SyncTable, r: Row): Row {
     case 'highlights': {
       const h = r as unknown as Highlight
       return {
-        id: h.id, book_id: h.bookId, page: h.page, color: h.color, text: h.text, note: n(h.note), rects: h.rects,
+        id: h.id, book_id: h.bookId, page: h.page, color: h.color, text: h.text, note: n(h.note), rects: h.rects, cfi: n(h.cfi),
         created_at: h.createdAt, updated_at: h.updatedAt ?? Date.now(), deleted: false,
       }
     }
@@ -155,7 +155,7 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
     case 'highlights':
       return {
         ...base, id: r.id, bookId: r.book_id, page: r.page, color: r.color, text: r.text ?? '', note: u(r.note as string | null),
-        rects: r.rects ?? [], createdAt: r.created_at ?? Date.now(),
+        rects: r.rects ?? [], cfi: u(r.cfi as string | null), createdAt: r.created_at ?? Date.now(),
       }
     case 'bookmarks':
       return { ...base, id: r.id, bookId: r.book_id, page: r.page, createdAt: r.created_at ?? Date.now() }

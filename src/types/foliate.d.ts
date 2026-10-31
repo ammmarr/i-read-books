@@ -34,12 +34,23 @@ declare module 'foliate-js/view.js' {
     prev: () => Promise<void>
     getContents: () => { doc: Document; index: number }[]
   }
+  export interface FoliateSearchResult {
+    label?: string
+    subitems?: { cfi: string; excerpt: { pre: string; match: string; post: string } }[]
+    progress?: number
+  }
   export class View extends HTMLElement {
     book: FoliateBook
     renderer: FoliateRenderer
     lastLocation: FoliateLocation | null
     open(book: FoliateBook | File | Blob): Promise<void>
     close(): void
+    addAnnotation(annotation: { value: string; [k: string]: unknown }, remove?: boolean): Promise<{ index: number; label: string } | undefined>
+    deleteAnnotation(annotation: { value: string }): Promise<unknown>
+    getCFI(index: number, range?: Range): string
+    resolveCFI(cfi: string): { index: number; anchor: (doc: Document) => Range | Element }
+    search(opts: { query: string; matchCase?: boolean; matchDiacritics?: boolean; matchWholeWords?: boolean; index?: number }): AsyncGenerator<FoliateSearchResult | 'done'>
+    clearSearch(): void
     init(opts: { lastLocation?: string | number | null; showTextStart?: boolean }): Promise<void>
     goTo(target: string | number): Promise<unknown>
     goToFraction(fraction: number): Promise<void>
@@ -50,4 +61,18 @@ declare module 'foliate-js/view.js' {
     getSectionFractions(): number[]
   }
   export function makeBook(file: File | Blob | string): Promise<FoliateBook>
+}
+
+declare module 'foliate-js/overlayer.js' {
+  type Draw = (rects: DOMRectList | DOMRect[], options?: Record<string, unknown>) => SVGElement
+  export class Overlayer {
+    static highlight: Draw
+    static underline: Draw
+    static outline: Draw
+  }
+}
+
+declare module 'foliate-js/epubcfi.js' {
+  /** Orders two CFIs: negative, zero or positive. */
+  export function compare(a: string, b: string): number
 }

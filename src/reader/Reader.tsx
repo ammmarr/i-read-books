@@ -197,7 +197,7 @@ export default function Reader() {
     )
   const opened = doc ?? ebook
   if (!book || !opened || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} checking={!!book && !!opened && !fresh} />
-  if (ebook) return <EpubReader key={book.id} book={book} ebook={ebook} />
+  if (ebook) return <EpubReader key={book.id} book={book} ebook={ebook} openAt={openAt} />
   return <ReaderView key={book.id} book={book} doc={doc!} openAt={openAt} />
 }
 

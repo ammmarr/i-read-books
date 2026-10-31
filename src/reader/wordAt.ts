@@ -54,8 +54,13 @@ export function placeOf(node: Node | null | undefined, word: string): { page: nu
     .join(' ')
     .replace(/\s+/g, ' ')
     .replace(/(\p{L})- (\p{Ll})/gu, '$1$2')
+  return { page, top, context: sentenceAround(text, word) }
+}
+
+/** The sentence `word` is in, from a run of text (cut down around it when long). */
+export function sentenceAround(text: string, word: string): string | undefined {
   const at = text.toLowerCase().indexOf(word.toLowerCase())
-  if (at < 0) return { page, top, context: text.trim().slice(0, 200) || undefined }
+  if (at < 0) return text.trim().slice(0, 200) || undefined
   const before = text.slice(0, at)
   const start = Math.max(before.lastIndexOf('. '), before.lastIndexOf('? '), before.lastIndexOf('! '))
   const endMatch = /[.?!](\s|$)/.exec(text.slice(at + word.length))
@@ -69,5 +74,5 @@ export function placeOf(node: Node | null | undefined, word: string): { page: nu
     const to = cut.length < 200 ? cut.length : cut.lastIndexOf(' ')
     sentence = `${from > 0 ? '…' : ''}${cut.slice(0, to > 0 ? to : cut.length).trim()}…`
   }
-  return { page, top, context: sentence || undefined }
+  return sentence || undefined
 }

@@ -239,7 +239,7 @@ function OutlineNode({
 
 function Highlights({ highlights, onJumpHighlight, onDeleteHighlight, onCopyAll }: Props) {
   const [color, setColor] = useState<HighlightColor | 'all'>('all')
-  const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || a.rects[0][1] - b.rects[0][1])
+  const list = highlights.filter((h) => color === 'all' || h.color === color).sort((a, b) => a.page - b.page || (a.rects[0]?.[1] ?? 0) - (b.rects[0]?.[1] ?? 0) || a.createdAt - b.createdAt)
   if (!highlights.length)
     return <Empty icon={<Highlighter className="size-5" />} title="No highlights yet" body="Select any text on a page and pick a colour. Add a note to remember why it mattered." />
   return (

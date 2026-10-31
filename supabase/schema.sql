@@ -61,6 +61,7 @@ create table if not exists public.irb_highlights (
   text        text,
   note        text,
   rects       jsonb,
+  cfi         text,
   created_at  bigint,
   updated_at  bigint not null,
   server_ts   bigint,
@@ -180,6 +181,8 @@ alter table public.irb_books add column if not exists read_pages_set_at bigint;
 alter table public.irb_books add column if not exists position_at bigint;
 alter table public.irb_recaps add column if not exists kind text;
 alter table public.irb_recaps add column if not exists parent text;
+-- EPUB highlights: the exact passage (an EPUB CFI)
+alter table public.irb_highlights add column if not exists cfi text;
 
 -- ── triggers, indexes, row-level security (only you can see your rows)
 do $$
