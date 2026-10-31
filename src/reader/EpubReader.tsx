@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowLeft, BookA, Bookmark as BookmarkIcon, ChevronLeft, ChevronRight, CornerUpLeft, FoldHorizontal, Keyboard, List, Maximize, Minimize, Minus, Plus, Search, Trash2, Trophy, Type, UnfoldHorizontal } from 'lucide-react'
-import type { FoliateBook, FoliateLocation, FoliateTocItem, View } from 'foliate-js/view.js'
+import type { FoliateBook, FoliateTocItem } from 'foliate-js/view.js'
+import { EpubScroller, type PageLook, type ScrollLocation } from './epubScroller'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor } from '../db/db'
 import { setStatus } from '../db/books'
 import { IconButton } from '../components/ui/Button'
@@ -31,46 +32,33 @@ import type { OpenAt } from './Reader'
 // ── How it looks ────────────────────────────────────────────────────────
 
 interface Palette {
+  /** The page. */
   bg: string
   fg: string
   link: string
   dark: boolean
 }
 const PALETTES = {
-  paper: { bg: '#fdfdfb', fg: '#1b1b1b', link: '#0b62d6', dark: false },
-  sepia: { bg: '#f4ecd8', fg: '#3b2f1e', link: '#8a5a1c', dark: false },
+  paper: { bg: '#ffffff', fg: '#1b1b1b', link: '#0b62d6', dark: false },
+  sepia: { bg: '#f6efdd', fg: '#3b2f1e', link: '#8a5a1c', dark: false },
   sepiaDark: { bg: '#2a2620', fg: '#e6dcc6', link: '#e2b36c', dark: true },
-  night: { bg: '#111111', fg: '#d6d3cd', link: '#7cb8ff', dark: true },
+  night: { bg: '#171717', fg: '#d6d3cd', link: '#7cb8ff', dark: true },
 } satisfies Record<string, Palette>
-
-/** The book's own styles, nudged to the page theme and your text size. */
-function bookCss(p: Palette, size: number, lookup = false) {
-  return `
-    @namespace epub "http://www.idpf.org/2007/ops";
-    ${lookup ? 'html, body, * { cursor: help !important; }' : ''}
-    html { color-scheme: ${p.dark ? 'dark' : 'light'}; font-size: ${size}% !important; }
-    html, body { background: ${p.bg} !important; color: ${p.fg} !important; }
-    ${p.dark ? 'body * { color: inherit !important; background-color: transparent !important; }' : ''}
-    a:link, a:visited { color: ${p.link} !important; }
-    p, li, blockquote, dd { line-height: 1.6; -webkit-hyphens: auto; hyphens: auto; widows: 2; orphans: 2; }
-    [align="left"] { text-align: left; } [align="right"] { text-align: right; } [align="center"] { text-align: center; }
-    pre { white-space: pre-wrap !important; }
-    aside[epub|type~="footnote"], aside[epub|type~="endnote"], aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none; }
-    ::selection { background: ${p.dark ? 'rgba(124, 184, 255, .35)' : 'rgba(0, 112, 243, .2)'}; }
-  `
+/** The desk the pages sit on (as in the PDF reader). */
+function deskOf(theme: PageTheme, appDark: boolean) {
+  if (theme === 'night') return '#0b0b0b'
+  if (theme === 'sepia') return appDark ? '#1c1a15' : '#e6ddc8'
+  return appDark ? '#161616' : '#ebebeb'
 }
 
-type Flow = 'paginated' | 'scrolled'
 interface TypePrefs {
-  /** Text size, % of the book's own. */
+  /** Text size, % of the default. */
   size: number
-  /** Scroll (like the PDF reader: down through the whole book) or turn pages. */
-  flow: Flow
-  /** Text across the whole screen (Ctrl F), not a comfortable column. */
+  /** Pages across the whole screen (Ctrl F), not a comfortable column. */
   wide: boolean
 }
-const TYPE_KEY = 'irb-epub-type-2'
-const TYPE_DEFAULT: TypePrefs = { size: 100, flow: 'scrolled', wide: false }
+const TYPE_KEY = 'irb-epub-type-3'
+const TYPE_DEFAULT: TypePrefs = { size: 100, wide: false }
 function loadType(): TypePrefs {
   try {
     return { ...TYPE_DEFAULT, ...JSON.parse(localStorage.getItem(TYPE_KEY) || '{}') }
@@ -80,16 +68,6 @@ function loadType(): TypePrefs {
 }
 const SIZE_MIN = 70
 const SIZE_MAX = 240
-/** How the text sits on the screen. */
-function layoutOf(t: TypePrefs) {
-  return {
-    flow: t.flow,
-    margin: '48px',
-    gap: t.wide ? '3%' : '6%',
-    'max-inline-size': t.wide ? '4000px' : '680px',
-    'max-column-count': t.wide ? '1' : '2',
-  }
-}
 
 /** This device's exact spot (a CFI) — used while it's still where the book says you are. */
 const spotKey = (id: string) => `irb-epub-spot-${id}`
@@ -168,10 +146,11 @@ const paragraphOf = (r: Range) => {
 }
 
 /**
- * An EPUB, read with foliate-js: reflowable text in your page theme, turned
- * a screen at a time (or scrolled). Its "pages" are locations of 1,500
- * characters (lib/epub.ts), so your place, pages read, reading time,
- * "Still reading?" and sync work as they do for PDFs.
+ * An EPUB, read like a PDF: pages one below another on the desk, in one
+ * scroll through the whole book (epubScroller.ts), in your page theme. Its
+ * "pages" for progress are locations of 1,500 characters (lib/epub.ts), so
+ * your place, pages read, reading time, "Still reading?" and sync work as
+ * they do for PDFs.
  */
 export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: FoliateBook; openAt?: OpenAt }) {
   const navigate = useNavigate()
@@ -181,10 +160,10 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   const touch = useIsTouch()
 
   const host = useRef<HTMLDivElement>(null)
-  const viewRef = useRef<View | null>(null)
+  const viewRef = useRef<EpubScroller | null>(null)
   const [ready, setReady] = useState(false)
-  const [loc, setLoc] = useState<FoliateLocation | null>(null)
-  const locRef = useRef<FoliateLocation | null>(null)
+  const [loc, setLoc] = useState<ScrollLocation | null>(null)
+  const locRef = useRef<ScrollLocation | null>(null)
   const [chrome, setChrome] = useState(true)
   const [tocOpen, setTocOpen] = useState(false)
   const [tocTab, setTocTab] = useState<'contents' | 'highlights' | 'bookmarks'>('contents')
@@ -207,6 +186,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   marksRef.current = marks
   /** Which section each loaded page document is. */
   const docIndex = useRef(new WeakMap<Document, number>())
+  const liveDocs = () => [...(host.current?.querySelectorAll('iframe') ?? [])].map((f) => f.contentDocument).filter((d): d is Document => !!d)
   /** What's selected in the book (it lives inside a page's frame, not the app). */
   const selRef = useRef<{ doc: Document; index: number; range: Range; text: string } | null>(null)
   const [selAnchor, setSelAnchor] = useState<{ rect: DOMRect; below?: boolean; word: string | null; under: Highlight[] } | null>(null)
@@ -497,26 +477,28 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   touchRef.current = touch
   const chromeRef = useRef({ lock: lockChrome })
   chromeRef.current.lock = lockChrome
-  const flowRef = useRef(type.flow)
-  flowRef.current = type.flow
   const typeRef = useRef(type)
   typeRef.current = type
   /** Text bigger (+1) or smaller (−1), from the keys, Ctrl+wheel or the panel. */
   const zoom = (dir: 1 | -1) => setType((t) => ({ ...t, size: Math.max(SIZE_MIN, Math.min(SIZE_MAX, t.size + dir * 10)) }))
   const zoomRef = useRef(zoom)
   zoomRef.current = zoom
+  const look: PageLook = useMemo(
+    () => ({ size: type.size, wide: type.wide, page: pal.bg, desk: deskOf(pageTheme, dark), fg: pal.fg, link: pal.link, dark: pal.dark }),
+    [type.size, type.wide, pal, pageTheme, dark],
+  )
+  const lookRef = useRef(look)
+  lookRef.current = look
   useEffect(() => {
-    const el = document.createElement('foliate-view') as View
-    el.style.cssText = 'display:block;width:100%;height:100%'
-    host.current!.append(el)
+    const el = new EpubScroller(host.current!, ebook, lookRef.current)
     viewRef.current = el
     let alive = true
 
     const prevFraction = { current: null as number | null }
     const onRelocate = (e: Event) => {
-      const d = (e as CustomEvent<FoliateLocation>).detail
+      const d = (e as CustomEvent<ScrollLocation>).detail
       // Somewhere else now: cards and toolbars pinned to the old screen go.
-      if (locRef.current && locRef.current.cfi !== d.cfi) live.current.clearPops()
+      if (locRef.current && locRef.current.location.current !== d.location.current) live.current.clearPops()
       locRef.current = d
       setLoc(d)
       if (!movable.current || performance.now() - lastInput.current > 2500) return
@@ -569,103 +551,50 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         },
         { passive: false },
       )
-      // Scrolling: a chapter is one long page; keep scrolling at its end (or start) and the
-      // next (or previous) one follows, so the book scrolls through like a PDF.
-      let over = 0
-      let overT: ReturnType<typeof setTimeout> | undefined
-      const overscroll = (dy: number) => {
-        const r = el.renderer as unknown as { start: number; end: number; viewSize: number }
-        if (flowRef.current !== 'scrolled' || !r) return
-        const atBottom = r.viewSize - r.end <= 2
-        const atTop = r.start <= 0
-        if ((dy > 0 && !atBottom) || (dy < 0 && !atTop)) return void (over = 0)
-        over += dy
-        clearTimeout(overT)
-        overT = setTimeout(() => (over = 0), 400)
-        if (Math.abs(over) < 140) return
-        over = 0
-        touched()
-        void (dy > 0 ? el.next() : el.prev())
-      }
-      doc.addEventListener('wheel', (w: WheelEvent) => !w.ctrlKey && !w.metaKey && overscroll(w.deltaMode === 1 ? w.deltaY * 20 : w.deltaY), { passive: true })
-      let touchY: number | null = null
-      doc.addEventListener('touchstart', (t: TouchEvent) => (touchY = t.touches[0]?.clientY ?? null), { passive: true })
-      doc.addEventListener(
-        'touchmove',
-        (t: TouchEvent) => {
-          const y = t.touches[0]?.clientY
-          if (touchY == null || y == null) return
-          overscroll((touchY - y) * 1.5)
-          touchY = y
-        },
-        { passive: true },
-      )
-      // Paged: tap the left or right edge to turn, the middle for the bars.
+      // A tap: the word's meaning when looking words up; else the bars (a highlight under it opens instead).
       doc.addEventListener('click', (c: MouseEvent) => {
         if ((c.target as Element | null)?.closest?.('a[href]')) return
         if (doc.getSelection()?.isCollapsed === false) return
-        // Looking words up (the toggle, or Shift-click): the tap is for the word under it.
         if (lookupRef.current || c.shiftKey) {
           const w = wordAtDocPoint(doc, c.clientX, c.clientY)
           if (w) live.current.define(doc, w.word, w.range)
           return
         }
-        const frame = doc.defaultView?.frameElement?.getBoundingClientRect()
-        const box = el.getBoundingClientRect()
-        const x = ((frame?.left ?? 0) + c.clientX - box.left) / box.width
-        // A highlight under the tap opens instead (foliate says so right after this).
         setTimeout(() => {
           if (performance.now() - annotationTap.current < 300) return
-          if (flowRef.current === 'paginated' && x < 0.28) void el.goLeft()
-          else if (flowRef.current === 'paginated' && x > 0.72) void el.goRight()
-          else setChrome((v) => !v)
+          setChrome((v) => !v)
         }, 0)
       })
-    }
-    // Highlights: drawn by foliate's overlay, each time a section's page loads.
-    let Overlayer: typeof import('foliate-js/overlayer.js').Overlayer | null = null
-    const onCreateOverlay = (e: Event) => {
-      const { index } = (e as CustomEvent<{ index: number }>).detail
-      for (const h of marksRef.current) {
-        try {
-          if (el.resolveCFI(h.cfi!).index === index) void el.addAnnotation({ value: h.cfi!, color: h.color })
-        } catch {
-          /* doesn't resolve in this copy of the book */
-        }
-      }
-    }
-    const onDraw = (e: Event) => {
-      const { draw, annotation } = (e as CustomEvent<{ draw: (f: unknown, o: unknown) => void; annotation: { color: HighlightColor } }>).detail
-      if (Overlayer) draw(Overlayer.highlight, { color: swatchOf(annotation.color) })
+      doc.documentElement.classList.toggle('irb-lookup', lookupRef.current)
     }
     const onShowAnnotation = (e: Event) => {
       annotationTap.current = performance.now()
       live.current.showAnnotation((e as CustomEvent<{ value: string; range: Range }>).detail)
     }
-    el.addEventListener('create-overlay', onCreateOverlay)
-    el.addEventListener('draw-annotation', onDraw)
+    // Scrolling the desk (between or beside the pages) is you too.
+    const onDeskInput = () => touched()
+    for (const ev of ['pointerdown', 'wheel', 'touchstart']) el.el.addEventListener(ev, onDeskInput, { passive: true })
     el.addEventListener('show-annotation', onShowAnnotation)
     el.addEventListener('relocate', onRelocate)
     el.addEventListener('load', onDocLoad)
 
     ;(async () => {
       try {
-        Overlayer = (await import('foliate-js/overlayer.js')).Overlayer
-        await el.open(ebook)
+        await el.open()
         if (!alive) return
-        for (const [k, v] of Object.entries(layoutOf(typeRef.current))) el.renderer.setAttribute(k, v)
-        applyStyles()
+        for (const h of marksRef.current) void el.addAnnotation({ value: h.cfi!, color: h.color })
         // Opened at a note or a word; else exactly where this device left off, if that's still
         // your spot; else the saved location.
         const spot = loadSpot(book.id)
         const note = openAt?.highlightId ? await db.highlights.get(openAt.highlightId) : undefined
-        if (note?.cfi) await el.init({ lastLocation: note.cfi })
+        if (note?.cfi) await el.goTo(note.cfi)
         else if (openAt && book.pageCount > 0) await el.goToFraction(Math.min(1, openAt.page / book.pageCount))
-        else if (spot && spot.page === book.currentPage) await el.init({ lastLocation: spot.cfi })
+        else if (spot && spot.page === book.currentPage && spot.cfi) await el.goTo(spot.cfi)
         else if (book.currentPage > 0 && book.pageCount > 0) await el.goToFraction(Math.min(1, book.currentPage / book.pageCount))
-        else await el.init({ showTextStart: true })
+        else await el.goToTextStart()
         if (!alive) return
         setReady(true)
+        el.measureAll()
         // What restoring just did isn't a move; what comes next is. ("Continue from page N": that's your spot now.)
         setTimeout(() => {
           movable.current = true
@@ -683,23 +612,20 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
       alive = false
       el.removeEventListener('relocate', onRelocate)
       el.removeEventListener('load', onDocLoad)
-      el.removeEventListener('create-overlay', onCreateOverlay)
-      el.removeEventListener('draw-annotation', onDraw)
       el.removeEventListener('show-annotation', onShowAnnotation)
       el.close()
-      el.remove()
       viewRef.current = null
     }
   }, [ebook]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const applyStyles = useCallback(() => viewRef.current?.renderer?.setStyles?.(bookCss(pal, type.size, lookupOn)), [pal, type.size, lookupOn])
-  // Highlighter ink: multiplied into paper, a little stronger on dark pages.
+  // Theme, text size or width changed: the pages follow (and are laid out again for size or width).
   useEffect(() => {
-    const el = viewRef.current
-    if (!el) return
-    el.style.setProperty('--overlayer-highlight-opacity', pal.dark ? '0.4' : '0.45')
-    el.style.setProperty('--overlayer-highlight-blend-mode', pal.dark ? 'normal' : 'multiply')
-  }, [pal.dark, ready])
+    if (ready) viewRef.current?.setLook(look)
+  }, [look, ready])
+  // Looking words up: the cursor says so over the text.
+  useEffect(() => {
+    for (const d of liveDocs()) d.documentElement.classList.toggle('irb-lookup', lookupOn)
+  }, [lookupOn]) // eslint-disable-line react-hooks/exhaustive-deps
   // New, recoloured or removed highlights (here or synced in): redraw just those.
   const drawn = useRef(new Map<string, HighlightColor>())
   useEffect(() => {
@@ -710,13 +636,6 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
     for (const [cfi, color] of now) if (drawn.current.get(cfi) !== color) void v.addAnnotation({ value: cfi, color }).catch(() => {})
     drawn.current = now
   }, [marks, ready])
-  useEffect(() => {
-    if (ready) applyStyles()
-  }, [ready, applyStyles])
-  useEffect(() => {
-    const r = viewRef.current?.renderer
-    if (ready && r) for (const [k, v] of Object.entries(layoutOf(type))) r.setAttribute(k, v)
-  }, [ready, type.flow, type.wide]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     try {
       localStorage.setItem(TYPE_KEY, JSON.stringify(type))
@@ -813,23 +732,18 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
     // Shift with arrows, Home/End or Page Up/Down extends a selection — the browser's, not a turn.
     if (e.shiftKey && /^(Arrow|Home$|End$|Page)/.test(e.key)) return
     touched()
-    // Scroll mode: move the chapter's scroll position (foliate's scrollBy is for swiping pages).
-    const r = v.renderer as unknown as { containerPosition: number }
-    const nudge = (dy: number) => (r.containerPosition = r.containerPosition + dy)
     switch (e.key) {
       case 'ArrowRight':
-        void v.goRight()
+        void v.next()
         break
       case 'ArrowLeft':
-        void v.goLeft()
+        void v.prev()
         break
       case 'ArrowDown':
-        if (type.flow !== 'scrolled') return
-        nudge(60)
+        v.scrollBy(60)
         break
       case 'ArrowUp':
-        if (type.flow !== 'scrolled') return
-        nudge(-60)
+        v.scrollBy(-60)
         break
       case 'PageDown':
       case ' ':
@@ -839,12 +753,10 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         void v.prev()
         break
       case 'j':
-        if (type.flow === 'scrolled') nudge(120)
-        else void v.next()
+        v.scrollBy(120)
         break
       case 'k':
-        if (type.flow === 'scrolled') nudge(-120)
-        else void v.prev()
+        v.scrollBy(-120)
         break
       case 'Home':
         goToPage(0)
@@ -916,10 +828,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
     if (lockChrome) setChrome(true)
   }, [lockChrome])
   useEffect(() => {
-    const el = viewRef.current
-    if (!el) return
-    if (chrome) el.removeAttribute('autohide-cursor')
-    else el.setAttribute('autohide-cursor', '')
+    viewRef.current?.setCursorHidden(!chrome)
   }, [chrome, ready])
   // Android's status bar sits over the top bar, or over the page once it slides away.
   useEffect(() => {
@@ -937,7 +846,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   const minutesLeft = loc?.time?.section ?? 0
 
   return (
-    <div className="relative h-dvh overflow-hidden" style={{ background: pal.bg }}>
+    <div className="relative h-dvh overflow-hidden" style={{ background: look.desk }}>
       <div ref={host} className="absolute inset-x-0 bottom-[var(--safe-area-inset-bottom,env(safe-area-inset-bottom))] top-[var(--safe-area-inset-top,env(safe-area-inset-top))]" />
       {!ready && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
@@ -1033,7 +942,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
           >
             <div className="mx-auto flex max-w-[760px] items-center gap-2 px-3 py-2.5">
               {!touch && (
-                <IconButton label="Previous page" onClick={() => (touched(), void viewRef.current?.goLeft())}>
+                <IconButton label="Previous screen" onClick={() => (touched(), void viewRef.current?.prev())}>
                   <ChevronLeft className="size-[18px]" />
                 </IconButton>
               )}
@@ -1067,7 +976,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
                 </div>
               </div>
               {!touch && (
-                <IconButton label="Next page" onClick={() => (touched(), void viewRef.current?.goRight())}>
+                <IconButton label="Next screen" onClick={() => (touched(), void viewRef.current?.next())}>
                   <ChevronRight className="size-[18px]" />
                 </IconButton>
               )}
@@ -1374,20 +1283,6 @@ function TypePanel({ type, setType, theme, setTheme }: { type: TypePrefs; setTyp
             >
               <span className="size-7 rounded-full border border-hairline" style={{ background: t.swatch }} />
               {t.label}
-            </button>
-          ))}
-        </div>
-      </section>
-      <section>
-        <div className="mb-2 text-mono-eyebrow text-mute">Layout</div>
-        <div className="grid grid-cols-2 gap-2">
-          {(['scrolled', 'paginated'] as Flow[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => setType({ ...type, flow: f })}
-              className={`rounded-md border px-3 py-2.5 text-body-md transition-colors ${type.flow === f ? 'border-link text-ink' : 'border-hairline text-body hover:bg-hairline-soft'}`}
-            >
-              {f === 'paginated' ? 'Pages' : 'Scroll'}
             </button>
           ))}
         </div>

@@ -75,4 +75,16 @@ declare module 'foliate-js/overlayer.js' {
 declare module 'foliate-js/epubcfi.js' {
   /** Orders two CFIs: negative, zero or positive. */
   export function compare(a: string, b: string): number
+  export const isCFI: RegExp
+  export function joinIndir(...xs: string[]): string
+  export function fromRange(range: Range): string
+  export const fake: { fromIndex: (i: number) => string; toIndex: (part: unknown) => number }
+}
+
+declare module 'foliate-js/search.js' {
+  export function searchMatcher(textWalker: unknown, opts: Record<string, unknown>): (doc: Document, query: string) => Iterable<{ range: Range; excerpt: { pre: string; match: string; post: string } }>
+}
+
+declare module 'foliate-js/text-walker.js' {
+  export const textWalker: unknown
 }
