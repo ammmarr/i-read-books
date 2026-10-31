@@ -18,7 +18,7 @@ import { CHARS_PER_LOC } from '../lib/epub'
  */
 
 export interface PageLook {
-  /** Text size, % of the default (17.5 px). */
+  /** Text size, % of the default (18.5 px). */
   size: number
   /** Text across the whole screen (Ctrl F) rather than a comfortable column. */
   wide: boolean
@@ -62,7 +62,7 @@ const GAP = 18 // between pages
 /** Room above the first page and below the last, clear of the bars (as in the PDF reader). */
 const PAD_TOP = 64
 const PAD_BOTTOM = 96
-const BASE_PX = 17.5
+const BASE_PX = 18.5
 const HL_RGB: Record<HighlightColor, string> = {
   yellow: '252, 211, 77',
   green: '110, 231, 160',
@@ -89,7 +89,7 @@ export class EpubScroller extends EventTarget {
   private totalSize = 0
   private starts: number[] = []
   private totalPages = 0
-  private geo = { pageW: 600, pageH: 840, padX: 48, padY: 56, textW: 504, textH: 728, colGap: 40, left: 0 }
+  private geo = { pageW: 600, pageH: 840, padX: 48, padY: 56, textW: 504, textH: 728, colGap: 40, left: 0, zoom: 1 }
   private mounted = new Map<number, Mounted>()
   private queue: number[] = []
   private measuring = false
@@ -192,11 +192,15 @@ export class EpubScroller extends EventTarget {
     const w = this.el.clientWidth || window.innerWidth
     this.width = w
     const side = w < 600 ? 10 : 28
-    const pageW = Math.round(this.look.wide ? w - side * 2 : Math.min(w - side * 2, 760))
-    const pageH = Math.round(pageW * (this.look.wide ? 1.15 : 1.414))
-    const padX = Math.round(Math.max(22, Math.min(76, pageW * 0.09)))
-    const padY = Math.round(Math.max(30, Math.min(84, pageH * 0.065)))
-    this.geo = { pageW, pageH, padX, padY, textW: pageW - padX * 2, textH: pageH - padY * 2, colGap: padX * 2, left: Math.round((w - pageW) / 2) }
+    // The page as it reads best; "fill the screen" is that same page zoomed to the screen's width (like
+    // fitting a PDF page to the width): text grows with it, so a line never gets longer.
+    const baseW = Math.min(w - side * 2, 720)
+    const zoom = this.look.wide ? Math.max(1, (w - side * 2) / baseW) : 1
+    const pageW = Math.round(baseW * zoom)
+    const pageH = Math.round(baseW * 1.414 * zoom)
+    const padX = Math.round(Math.max(22, Math.min(84, baseW * 0.11)) * zoom)
+    const padY = Math.round(Math.max(30, Math.min(84, baseW * 1.414 * 0.065)) * zoom)
+    this.geo = { pageW, pageH, padX, padY, textW: pageW - padX * 2, textH: pageH - padY * 2, colGap: padX * 2, left: Math.round((w - pageW) / 2), zoom }
   }
 
   /** Before a chapter is measured: its pages, guessed from its size (and what's been measured so far). */
@@ -277,10 +281,15 @@ export class EpubScroller extends EventTarget {
         height: ${textH}px !important; width: ${textW}px !important; max-width: none !important; min-height: 0 !important;
         column-width: ${textW}px !important; column-gap: ${colGap}px !important; column-fill: auto !important;
         overflow: hidden !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
-        font-size: ${(BASE_PX * L.size) / 100}px !important; -webkit-text-size-adjust: none; text-size-adjust: none;
+        font-size: ${(BASE_PX * L.size * this.geo.zoom) / 100}px !important; -webkit-text-size-adjust: none; text-size-adjust: none;
         background: transparent !important; color: ${L.fg} !important; color-scheme: ${L.dark ? 'dark' : 'light'};
       }
       body { margin: 0 !important; padding: 0 !important; background: transparent !important; color: inherit !important; line-height: 1.72 !important; }
+      /* Your text size wins over the book's own (many books fix it in px or pt). */
+      body, section, article, div, p, li, dd, dt, blockquote, td, th, pre { font-size: 1rem !important; }
+      h1 { font-size: 1.6rem !important; } h2 { font-size: 1.4rem !important; } h3 { font-size: 1.22rem !important; }
+      h4, h5, h6 { font-size: 1.08rem !important; }
+      small, sub, sup { font-size: 0.8em !important; }
       p, li, dd, dt, blockquote, div { line-height: 1.72 !important; }
       p { margin-top: 0 !important; margin-bottom: 0.9em !important; widows: 2; orphans: 2; }
       h1, h2, h3, h4, h5, h6 { line-height: 1.3 !important; margin: 1.2em 0 0.65em !important; break-after: avoid; }
