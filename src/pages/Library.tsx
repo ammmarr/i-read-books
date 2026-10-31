@@ -17,7 +17,7 @@ import { Button } from '../components/ui/Button'
 import { Menu } from '../components/ui/Menu'
 import { ProgressBar } from '../components/ui/Progress'
 import { Segmented } from '../components/ui/Segmented'
-import { goalsOf, useSettings } from '../lib/settings'
+import { dailyGoal, useSettings } from '../lib/settings'
 import { useWebReads, webSessions, webToday } from '../lib/web'
 import { bookStats, dailyTotals, streaks, summarize, todaySeconds } from '../lib/stats'
 import { formatDurationLong, greeting, pluralize } from '../lib/format'
@@ -329,20 +329,14 @@ function PickSomething({ books }: { books: Book[] }) {
   )
 }
 
-/**
- * Today against your goals: the ring is the overall goal (any mix of books and
- * Substack), filled in each one's colour; below, each goal on its own.
- */
+/** Today against your daily goal: all your reading, one number. */
 function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
-  const g = goalsOf(useSettings())
-  const books = todaySeconds(sessions)
-  const substack = webToday(reads)
-  const total = books + substack
-  const goal = g.overall * 60
+  const goalMin = dailyGoal(useSettings())
+  const total = todaySeconds(sessions) + webToday(reads)
+  const goal = goalMin * 60
   const met = goal > 0 && total >= goal
-  // Any reading keeps the streak going — books or Substack.
+  // Any reading keeps the streak going.
   const s = streaks(dailyTotals([...sessions, ...webSessions(reads)]))
-  const showSubstack = reads.length > 0
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
@@ -350,10 +344,10 @@ function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] 
       transition={{ duration: 0.5, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
     >
       <Link to="/stats" className="flex h-full items-center gap-5 rounded-md border border-hairline bg-canvas-elevated p-5 transition-colors hover:border-faint/40 sm:p-6 lg:flex-col lg:items-start lg:justify-between">
-        <GoalRing books={goal ? books / goal : 0} substack={goal ? substack / goal : 0} met={met}>
+        <GoalRing value={goal ? total / goal : 0} met={met}>
           <div className="text-center leading-none">
             <div className={`text-[20px] font-semibold tracking-tight ${met ? 'text-success' : 'text-ink'}`}>{Math.floor(total / 60)}</div>
-            <div className="mt-1 text-[11px] text-mute">of {g.overall}m</div>
+            <div className="mt-1 text-[11px] text-mute">of {goalMin}m</div>
           </div>
         </GoalRing>
         <div className="min-w-0 flex-1 lg:w-full lg:flex-none">
@@ -361,11 +355,6 @@ function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] 
           <p className="mt-2 text-label-sm text-ink">
             {met ? 'Daily goal reached — nice.' : total > 0 ? `${Math.max(1, Math.ceil((goal - total) / 60))} min to your goal` : 'No reading yet today'}
           </p>
-          <div className="mt-3 space-y-2.5">
-            <GoalLine label="Books" seconds={books} goal={g.books * 60} color="var(--color-link)" />
-            {/* Substack has no goal of its own: just its minutes, toward the total. */}
-            {showSubstack && <GoalLine label="Substack" seconds={substack} goal={0} color="var(--color-substack)" />}
-          </div>
           <p className="mt-3 flex items-center gap-1.5 text-body-sm text-mute">
             <Flame className={`size-3.5 ${s.readToday ? 'text-warning' : 'text-faint'}`} />
             {s.current > 0 ? `${s.current}-day streak` : 'Start a streak today'}
@@ -377,53 +366,22 @@ function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] 
   )
 }
 
-/** One goal's progress: "Books  35 / 60 min" over a thin bar in its colour. */
-function GoalLine({ label, seconds, goal, color }: { label: string; seconds: number; goal: number; color: string }) {
-  const m = Math.floor(seconds / 60)
-  const done = goal > 0 && seconds >= goal
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-3 text-body-sm">
-        <span className="flex items-center gap-1.5 text-body">
-          <span className="size-2 rounded-full" style={{ background: color }} />
-          {label}
-        </span>
-        <span className="tabular text-mute">
-          <span className={done ? 'font-medium text-success' : 'text-ink'}>{m}</span>
-          {goal > 0 ? ` / ${Math.round(goal / 60)} min` : ' min'}
-        </span>
-      </div>
-      {goal > 0 && <ProgressBar value={seconds / goal} thin color={done ? 'var(--color-success)' : color} className="mt-1" />}
-    </div>
-  )
-}
-
-/** The overall goal as a ring: books' share then Substack's, each in its colour. */
-function GoalRing({ books, substack, met, children }: { books: number; substack: number; met: boolean; children: React.ReactNode }) {
+/** The daily goal as a ring. */
+function GoalRing({ value, met, children }: { value: number; met: boolean; children: React.ReactNode }) {
   const size = 88, stroke = 6
   const r = (size - stroke) / 2
   const c = 2 * Math.PI * r
-  const b = Math.min(1, Math.max(0, books))
-  const s = Math.min(1 - b, Math.max(0, substack))
+  const v = Math.min(1, Math.max(0, value))
   return (
-    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }} role="img" aria-label={`Daily goal: ${Math.round((b + s) * 100)}%`}>
+    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }} role="img" aria-label={`Daily goal: ${Math.round(v * 100)}%`}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-hairline)" strokeWidth={stroke} />
-        {b > 0 && (
+        {v > 0 && (
           <motion.circle
             cx={size / 2} cy={size / 2} r={r} fill="none" stroke={met ? 'var(--color-success)' : 'var(--color-link)'} strokeWidth={stroke} strokeLinecap="round"
             initial={{ strokeDasharray: `0 ${c}` }}
-            animate={{ strokeDasharray: `${Math.max(0, b * c - (s > 0 ? 2 : 0))} ${c}` }}
+            animate={{ strokeDasharray: `${v * c} ${c}` }}
             transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-          />
-        )}
-        {s > 0 && (
-          <motion.circle
-            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={met ? 'var(--color-success)' : 'var(--color-substack)'} strokeWidth={stroke} strokeLinecap="round"
-            strokeDashoffset={-b * c}
-            initial={{ strokeDasharray: `0 ${c}` }}
-            animate={{ strokeDasharray: `${s * c} ${c}` }}
-            transition={{ duration: 0.9, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
           />
         )}
       </svg>

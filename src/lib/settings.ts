@@ -6,7 +6,7 @@ export type ZoomMode = 'auto' | 'width' | 'page' | 'custom'
 
 export interface Settings {
   theme: ThemePref
-  /** Daily minutes of books. (The overall goal is its own — see goalsOf.) */
+  /** The old books goal: no longer shown or set (see dailyGoal). */
   dailyGoalMinutes: number
   pageTheme: PageTheme
   keepAwake: boolean
@@ -18,12 +18,9 @@ export interface Settings {
   recapSections: boolean
   /** Books where you said "don't ask" for recaps. */
   recapsOffBooks: string[]
-  /**
-   * The old Substack goal: no longer shown or set. Only kept so a total never set by hand stays what it
-   * was (books + this) — see goalsOf.
-   */
+  /** The old Substack goal: no longer shown or set (see dailyGoal). */
   substackGoalMinutes: number
-  /** Daily minutes of reading in all, any mix of books and Substack; null = books + the old Substack goal. */
+  /** Your daily reading goal in minutes — the one goal; books and Substack both count. null = not set yet (see dailyGoal). */
   totalGoalMinutes: number | null
   /** Night Shift (warm screen) — this device only. See lib/nightShift.ts. */
   nightShift: 'off' | 'on' | 'scheduled'
@@ -56,12 +53,11 @@ const DEFAULTS: Settings = {
 }
 
 /**
- * Your daily goals: overall, filled by any mix of books and Substack, and books on their own. Substack
- * has no goal of its own. Until you set the overall goal, it's what it always was: books + the old
- * Substack goal.
+ * Your daily reading goal in minutes: one number for all your reading, books and Substack alike. Never
+ * set, it's what the old books and Substack goals added up to.
  */
-export function goalsOf(s: Pick<Settings, 'dailyGoalMinutes' | 'substackGoalMinutes' | 'totalGoalMinutes'>) {
-  return { books: s.dailyGoalMinutes, overall: s.totalGoalMinutes ?? s.dailyGoalMinutes + s.substackGoalMinutes }
+export function dailyGoal(s: Pick<Settings, 'dailyGoalMinutes' | 'substackGoalMinutes' | 'totalGoalMinutes'>) {
+  return s.totalGoalMinutes ?? s.dailyGoalMinutes + s.substackGoalMinutes
 }
 
 const KEY = 'irb-settings'

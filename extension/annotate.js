@@ -371,7 +371,7 @@
     <div class="stats">
       <div class="eyebrow">This article</div>
       <div style="display:flex;align-items:baseline;gap:8px;margin-top:6px"><span class="big" data-k="article">0</span><span class="muted">min read</span></div>
-      <div style="display:flex;justify-content:space-between;margin-top:12px" class="muted"><span>Read today · books and Substack</span><span data-k="today">0 min</span></div>
+      <div style="display:flex;justify-content:space-between;margin-top:12px" class="muted"><span>Read today</span><span data-k="today">0 min</span></div>
       <div class="bar" data-k="todaybar"><b></b></div>
       <div class="state" data-k="state" hidden></div>
     </div>

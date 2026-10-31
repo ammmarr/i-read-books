@@ -80,17 +80,14 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
   readCb.current = onPageRead
   const api = useRef({ here: () => {}, countAway: () => {} })
 
-  // Seconds already read today (other sessions), to detect crossing the goal.
+  // Seconds already read today (other sessions, Substack too), to detect crossing the goal.
   useEffect(() => {
     const st = state.current
-    db.sessions
-      .where('start')
-      .aboveOrEqual(startOfDay(Date.now()))
-      .toArray()
-      .then((xs) => {
-        st.todayBase = xs.reduce((a, s) => a + s.seconds, 0)
-        st.goalFired = st.todayBase >= goalSeconds
-      })
+    const from = startOfDay(Date.now())
+    Promise.all([db.sessions.where('start').aboveOrEqual(from).toArray(), db.webReads.where('start').aboveOrEqual(from).toArray()]).then(([xs, ws]) => {
+      st.todayBase = [...xs, ...ws].reduce((a, s) => a + s.seconds, 0)
+      st.goalFired = st.todayBase >= goalSeconds
+    })
   }, [goalSeconds])
 
   useEffect(() => {

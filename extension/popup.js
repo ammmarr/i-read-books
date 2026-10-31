@@ -31,17 +31,14 @@ async function render() {
   }
 
   const today = Object.values(visits).filter((v) => v.start >= startOfDay()).sort((a, b) => b.end - a.end)
-  // Your whole day against your one daily goal: Substack here, plus books from I read.
-  const substackSecs = today.reduce((a, v) => a + v.seconds, 0)
-  const bookSecs = books?.day === startOfDay() ? books.seconds : 0
-  const secs = substackSecs + bookSecs
+  // All of today's reading (here, and in books from I read) against your one daily goal.
+  const secs = today.reduce((a, v) => a + v.seconds, 0) + (books?.day === startOfDay() ? books.seconds : 0)
   const m = Math.floor(secs / 60)
   $('mins').textContent = String(m)
   $('goal').textContent = String(goal)
   $('bar-fill').style.width = `${Math.min(100, (secs / (goal * 60)) * 100)}%`
   $('bar-fill').classList.toggle('done', m >= goal)
-  const note = m >= goal ? 'Goal reached — nice.' : secs > 0 ? `${goal - m} min to your goal` : 'Open a Substack post and start reading.'
-  $('today-note').textContent = secs > 0 ? `${note} · Books ${Math.floor(bookSecs / 60)} min, Substack ${Math.floor(substackSecs / 60)} min` : note
+  $('today-note').textContent = m >= goal ? 'Goal reached — nice.' : secs > 0 ? `${goal - m} min to your goal` : 'Open a Substack post and start reading.'
 
   const list = $('reads')
   list.replaceChildren(

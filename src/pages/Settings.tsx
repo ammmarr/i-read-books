@@ -13,7 +13,7 @@ import { isStandalone, useInstallPrompt } from '../lib/install'
 import { formatBytes } from '../lib/format'
 import { AccountSync } from '../components/AccountSync'
 import { AigpSettings } from '../components/AigpSettings'
-import { DailyGoals, SharingSettings, SubstackSettings } from '../components/SubstackTime'
+import { DailyGoal, SharingSettings, SubstackSettings } from '../components/SubstackTime'
 import { useImporter } from '../components/Importer'
 import { cloudEnabled } from '../lib/supabase'
 import { setRecapsEnabled, setSectionRecaps, useRecapPrefs } from '../lib/recaps'
@@ -49,8 +49,8 @@ export default function SettingsPage() {
         </Group>
       )}
 
-      <Group title="Daily goals" desc="Your overall goal: any mix of books and Substack fills it. Books also have a goal of their own. Your streak counts any day with at least a minute of reading — books or Substack.">
-        <DailyGoals />
+      <Group title="Daily goal" desc="How long you want to read each day. All your reading counts, books and Substack alike. Your streak counts any day with at least a minute of reading.">
+        <DailyGoal />
       </Group>
 
       <Group title="Substack" desc="A small Chrome extension counts the time you actively read on Substack and adds it here — toward your daily goal.">

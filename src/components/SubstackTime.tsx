@@ -1,64 +1,31 @@
-import { BookOpen, Download, Minus, Plus } from 'lucide-react'
+import { Download, Minus, Plus } from 'lucide-react'
 import { motion } from 'motion/react'
-import { goalsOf, updateSettings, useSettings } from '../lib/settings'
+import { dailyGoal, updateSettings, useSettings } from '../lib/settings'
 import { useWebReads } from '../lib/web'
 import { relativeTime } from '../lib/format'
 import { isNative } from '../lib/native'
 import { useExtension } from '../lib/share'
 import { SubstackMark, XMark } from './ShareQuote'
 
-/**
- * Settings → Daily goals: the overall goal, filled by any mix of books and
- * Substack, and a goal for books. Substack has no goal of its own.
- */
-export function DailyGoals() {
-  const s = useSettings()
-  const g = goalsOf(s)
-  const setTotal = (m: number) => updateSettings({ totalGoalMinutes: Math.max(5, Math.min(600, m)) })
-  // A total never set by hand still follows books (books + the old Substack goal): pin it first, so
-  // changing books never moves it.
-  const setBooks = (m: number) => updateSettings({ dailyGoalMinutes: m, ...(s.totalGoalMinutes == null ? { totalGoalMinutes: g.overall } : {}) })
+/** Settings → Daily goal: one number for all your reading. */
+export function DailyGoal() {
+  const goal = dailyGoal(useSettings())
+  const set = (m: number) => updateSettings({ totalGoalMinutes: Math.max(5, Math.min(600, m)) })
   return (
-    <div>
-      <div className="flex items-center gap-3">
-        <div className="flex min-w-0 flex-1 items-baseline gap-2">
-          <motion.span key={g.overall} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
-            {g.overall}
-          </motion.span>
-          <span className="text-body-md text-mute">min a day in all</span>
-        </div>
-        <Step minus label="Less in all" disabled={g.overall <= 5} onClick={() => setTotal(g.overall - 5)} />
-        <Step label="More in all" onClick={() => setTotal(g.overall + 5)} />
+    <div className="flex items-center gap-3">
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <motion.span key={goal} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="inline-block text-[40px] font-semibold leading-none tracking-[-1.6px] text-ink">
+          {goal}
+        </motion.span>
+        <span className="text-body-md text-mute">min a day</span>
       </div>
-      <p className="mt-1 text-body-sm text-mute">Any mix of books and Substack counts toward it.</p>
-      <div className="mt-5 divide-y divide-hairline rounded-md border border-hairline">
-        <GoalRow icon={<BookOpen className="size-4" />} tone="var(--color-link)" label="Books" value={g.books} min={5} onChange={setBooks} />
-      </div>
+      <Step minus label="Less a day" disabled={goal <= 5} onClick={() => set(goal - 5)} />
+      <Step label="More a day" onClick={() => set(goal + 5)} />
     </div>
   )
 }
 
-function GoalRow({ icon, tone, label, value, min, onChange }: { icon: React.ReactNode; tone: string; label: string; value: number; min: number; onChange: (m: number) => void }) {
-  const set = (m: number) => onChange(Math.max(min, Math.min(240, m)))
-  return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <span className="grid size-8 shrink-0 place-items-center rounded-full text-white" style={{ background: tone }}>
-        {icon}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="text-body-md text-ink">{label}</div>
-      </div>
-      <Step minus label={`Less ${label.toLowerCase()}`} disabled={value <= min} onClick={() => set(value - 5)} />
-      <div className="w-[72px] text-center">
-        <span className="text-heading-md tabular text-ink">{value}</span>
-        <span className="ml-1 text-body-sm text-mute">min</span>
-      </div>
-      <Step label={`More ${label.toLowerCase()}`} onClick={() => set(value + 5)} />
-    </div>
-  )
-}
-
-/** A round − / + button for a goal. */
+/** A round − / + button for the goal. */
 function Step({ minus, label, disabled, onClick }: { minus?: boolean; label: string; disabled?: boolean; onClick: () => void }) {
   return (
     <button onClick={onClick} disabled={disabled} aria-label={label} className="grid size-8 shrink-0 place-items-center rounded-full border border-hairline text-body hover:bg-hairline-soft disabled:opacity-40">

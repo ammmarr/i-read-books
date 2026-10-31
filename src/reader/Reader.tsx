@@ -8,7 +8,7 @@ import {
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
 import { closePdf, flattenOutline, openPdfBlob, readOutline, resolveDest, type OutlineItem, type PDFDocumentProxy, type PdfLink } from '../lib/pdf'
-import { loadBookView, saveBookView, useSettings, type ZoomMode } from '../lib/settings'
+import { dailyGoal, loadBookView, saveBookView, useSettings, type ZoomMode } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
 import { useIsMobile, useIsTouch, vibrate } from '../lib/hooks'
 import { formatDuration, formatDurationLong } from '../lib/format'
@@ -777,10 +777,10 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     dwellFor,
     pageSeconds,
     onPageRead,
-    goalSeconds: settings.dailyGoalMinutes * 60,
+    goalSeconds: dailyGoal(settings) * 60,
     onGoalReached: () => {
       vibrate(20)
-      toast({ message: <span className="inline-flex items-center gap-1.5"><Trophy className="size-4 text-warning" /> Books goal reached</span>, description: `${settings.dailyGoalMinutes} minutes of books today. Keep the streak going.`, duration: 5000 })
+      toast({ message: <span className="inline-flex items-center gap-1.5"><Trophy className="size-4 text-warning" /> Daily goal reached</span>, description: `${dailyGoal(settings)} minutes of reading today. Keep the streak going.`, duration: 5000 })
     },
   })
 
