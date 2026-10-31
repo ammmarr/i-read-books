@@ -11,8 +11,8 @@ import { closePdf, flattenOutline, openPdfBlob, readOutline, resolveDest, type O
 import { dailyGoal, loadBookView, saveBookView, useSettings, type ZoomMode } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
 import { useIsMobile, useIsTouch, vibrate } from '../lib/hooks'
-import { formatDuration, formatDurationLong } from '../lib/format'
-import { Button, IconButton } from '../components/ui/Button'
+import { formatDuration } from '../lib/format'
+import { IconButton } from '../components/ui/Button'
 import { useToast } from '../components/ui/Toast'
 import { BookCover } from '../components/BookCover'
 import { Sheet } from '../components/ui/Sheet'
@@ -41,6 +41,10 @@ import {
 import { Menu } from '../components/ui/Menu'
 import { RecapWriter } from '../components/recap/RecapWriter'
 import { RecapPromptCard } from '../components/recap/RecapPrompt'
+import { StillReading } from './StillReading'
+import { EpubReader } from './EpubReader'
+import { isEpubBook, openEpub } from '../lib/epub'
+import type { FoliateBook } from 'foliate-js/view.js'
 
 const PT_TO_PX = 96 / 72
 const MIN_SCALE = 0.25
@@ -76,6 +80,7 @@ export default function Reader() {
   const { attach } = useImporter()
   const book = useLiveQuery(() => (id ? db.books.get(id) : undefined), [id])
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null)
+  const [ebook, setEbook] = useState<FoliateBook | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [download, setDownload] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -103,14 +108,19 @@ export default function Reader() {
     setError(null)
     ;(async () => {
       try {
+        const b = await db.books.get(id)
         let blob = (await db.files.get(id))?.blob
         if (!blob) {
           // Added on another device: fetch it from the cloud once, keep it here.
-          const b = await db.books.get(id)
           if (!b?.filePath || !getAuthSession()) throw new Error('missing')
           setDownload(0)
           blob = await downloadBookFile(b, (f) => alive && setDownload(f))
           if (alive) setDownload(null)
+        }
+        if (b && isEpubBook(b)) {
+          const eb = await openEpub(blob, b.fileName)
+          if (alive) setEbook(eb)
+          return
         }
         loaded = await openPdfBlob(blob)
         if (alive) setDoc(loaded)
@@ -167,7 +177,7 @@ export default function Reader() {
     return (
       <ReaderMessage
         title="Can’t open this book"
-        body={book?.filePath && getAuthSession() ? 'The copy on this device may be damaged. Download a fresh copy from your library.' : 'This PDF couldn’t be opened — the file may be damaged.'}
+        body={book?.filePath && getAuthSession() ? 'The copy on this device may be damaged. Download a fresh copy from your library.' : `This ${book && isEpubBook(book) ? 'EPUB' : 'PDF'} couldn’t be opened — the file may be damaged.`}
         onBack={() => navigate('/')}
         book={book}
         detail={detail}
@@ -185,8 +195,10 @@ export default function Reader() {
         }
       />
     )
-  if (!book || !doc || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} checking={!!book && !!doc && !fresh} />
-  return <ReaderView key={book.id} book={book} doc={doc} openAt={openAt} />
+  const opened = doc ?? ebook
+  if (!book || !opened || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} checking={!!book && !!opened && !fresh} />
+  if (ebook) return <EpubReader key={book.id} book={book} ebook={ebook} />
+  return <ReaderView key={book.id} book={book} doc={doc!} openAt={openAt} />
 }
 
 function ReaderLoading({ book, onBack, progress, checking }: { book?: Book; onBack: () => void; progress?: number | null; checking?: boolean }) {
@@ -1951,50 +1963,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         </div>
       ))}
 
-      {/* Left open? "Still reading?" — unanswered, the still time stops counting */}
-      <AnimatePresence>
-        {(asking != null || away) && (
-          <motion.div
-            key="still"
-            initial={{ opacity: 0, y: -12, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -8, scale: 0.98 }}
-            transition={{ type: 'spring', stiffness: 520, damping: 34 }}
-            role="alertdialog"
-            aria-live="assertive"
-            aria-label={away ? 'Reading time paused' : 'Still reading?'}
-            className="absolute left-1/2 top-[calc(var(--safe-area-inset-top,env(safe-area-inset-top))+76px)] z-50 flex w-[min(400px,calc(100vw-32px))] -translate-x-1/2 items-center gap-3 rounded-lg border border-hairline bg-canvas-elevated py-3 pl-4 pr-3 shadow-floating"
-          >
-            <Timer className={`size-4 shrink-0 ${away ? 'text-faint' : 'text-link'}`} />
-            <div className="min-w-0 flex-1">
-              <p className="text-label-sm text-ink">{!away ? 'Still reading?' : away.back ? 'Welcome back' : 'Reading time paused'}</p>
-              <p className="text-body-sm text-mute">
-                {!away
-                  ? `Your reading time pauses in ${asking} s.`
-                  : away.off > 0
-                    ? `${formatDurationLong(away.off)} while you were away ${away.off < 90 ? 'wasn’t' : 'weren’t'} counted.`
-                    : away.back
-                      ? 'Your reading time is running again.'
-                      : 'It runs again when you’re back.'}
-              </p>
-            </div>
-            {!away ? (
-              <Button size="sm" onClick={stillHere}>
-                I’m here
-              </Button>
-            ) : away.off > 0 ? (
-              <Button size="sm" variant="outline" onClick={countAway}>
-                I was reading
-              </Button>
-            ) : null}
-            {away?.back && (
-              <button onClick={dismissAway} aria-label="Dismiss" className="grid size-8 shrink-0 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
-                <XIcon className="size-3.5" />
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <StillReading asking={asking} away={away} stillHere={stillHere} countAway={countAway} dismissAway={dismissAway} />
 
       {/* Back to where you left off, after a jump */}
       <AnimatePresence>

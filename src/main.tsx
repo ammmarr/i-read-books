@@ -9,6 +9,7 @@ import { initNative, isNative } from './lib/native'
 import { enrichFromOpenLibrary } from './lib/readingList'
 import { initUpdates } from './lib/update'
 import { fillMissingMeanings } from './lib/words'
+import { repairReadPages } from './db/books'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -36,4 +37,5 @@ initUpdates()
 
 // Words looked up offline get their meaning once there's internet.
 setTimeout(() => void fillMissingMeanings(), 4000)
+setTimeout(() => void repairReadPages(), 3000)
 window.addEventListener('online', () => void fillMissingMeanings())

@@ -63,8 +63,8 @@ export default defineConfig({
         start_url: './',
         scope: './',
         categories: ['books', 'education', 'productivity'],
-        // Installed on a PC: "Open with → I read" for PDFs (Chromium browsers).
-        file_handlers: [{ action: './', accept: { 'application/pdf': ['.pdf'] } }],
+        // Installed on a PC: "Open with → I read" for PDFs and EPUBs (Chromium browsers).
+        file_handlers: [{ action: './', accept: { 'application/pdf': ['.pdf'], 'application/epub+zip': ['.epub'] } }],
         launch_handler: { client_mode: 'focus-existing' },
         shortcuts: [
           { name: 'Library', url: './#/', icons: [{ src: 'pwa-192x192.png', sizes: '192x192' }] },

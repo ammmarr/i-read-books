@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import { BookPlus, Check, CircleAlert, FileText, FileUp, Link2, Search, X } from 'lucide-react'
 import type { BookStatus } from '../db/db'
-import { addAnalyzedPdf, addListBook, analyzePdf, DuplicateTitleError, type PdfAnalysis } from '../db/books'
+import { addAnalyzedPdf, addListBook, analyzeBookFile, DuplicateTitleError, type PdfAnalysis } from '../db/books'
+import { isBookFile } from '../lib/epub'
 import { suggestBooks, type CatalogBook } from '../lib/readingList'
 import { useObjectUrl } from '../lib/hooks'
 import { Sheet } from './ui/Sheet'
@@ -38,7 +39,7 @@ export function AddBookSheet(p: Props) {
         onChange={p.onTab}
         ariaLabel="How to add"
         options={[
-          { value: 'pdf', label: <><FileText className="size-3.5" /> I have the PDF</> },
+          { value: 'pdf', label: <><FileText className="size-3.5" /> I have the file</> },
           { value: 'manual', label: <><BookPlus className="size-3.5" /> No PDF yet</> },
         ]}
       />
@@ -79,12 +80,12 @@ function PdfTab({ incoming, onBrowse, onAdded, onClose }: Props) {
 
   const analyze = async (files: File[]) => {
     const fresh = files
-      .filter((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name))
+      .filter(isBookFile)
       .map((f) => ({ key: `${f.name}-${f.size}-${Math.random()}`, file: f, state: 'analyzing' as const, title: '', author: '', attach: true }))
     setItems((xs) => [...xs, ...fresh])
     for (const it of fresh) {
       try {
-        const a = await analyzePdf(it.file)
+        const a = await analyzeBookFile(it.file)
         setItems((xs) => xs.map((x) => (x.key === it.key ? { ...x, state: 'ready', a, title: a.match?.title ?? a.title, author: a.match?.author || a.author } : x)))
       } catch {
         setItems((xs) => xs.map((x) => (x.key === it.key ? { ...x, state: 'error' } : x)))
@@ -130,7 +131,7 @@ function PdfTab({ incoming, onBrowse, onAdded, onClose }: Props) {
         <motion.span whileHover={{ y: -3 }} className="grid size-10 place-items-center rounded-full bg-hairline-soft text-body">
           <FileUp className="size-5" />
         </motion.span>
-        <span className="text-label-sm text-ink">{items.length ? 'Add more PDFs' : 'Drop PDFs here, or browse'}</span>
+        <span className="text-label-sm text-ink">{items.length ? 'Add more books' : 'Drop PDFs or EPUBs here, or browse'}</span>
         {!items.length && <span className="text-body-sm text-mute">We’ll read the title and author from each file — you can edit them before adding.</span>}
       </button>
 

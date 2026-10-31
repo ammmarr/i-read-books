@@ -11,7 +11,8 @@ export function parsePages(s: string | undefined | null): Set<number> {
   for (const part of s.split(',')) {
     const [a, b] = part.split('-').map((x) => parseInt(x, 10))
     if (Number.isNaN(a)) continue
-    const end = Number.isNaN(b) ? a : b
+    // A lone page ("7") has no second half: b is undefined there, not NaN.
+    const end = b === undefined || Number.isNaN(b) ? a : b
     for (let i = a; i <= end && i - a < 100_000; i++) out.add(i)
   }
   return out

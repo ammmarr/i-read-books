@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { AnimatePresence, motion } from 'motion/react'
 import { FileUp } from 'lucide-react'
 import { useNavigate } from 'react-router'
-import { addAnalyzedPdf, analyzePdf, DuplicateBookError, importPdf } from '../db/books'
+import { addAnalyzedPdf, analyzeBookFile, DuplicateBookError, importPdf } from '../db/books'
+import { BOOK_ACCEPT, isBookFile } from '../lib/epub'
 import { importReadingList, readListCsv } from '../lib/readingList'
 import { useToast } from './ui/Toast'
 import { AddBookSheet, type AddTab } from './AddBook'
@@ -28,7 +29,8 @@ export function useImporter() {
   return c
 }
 
-const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name)
+/** A PDF or an EPUB. */
+const isPdf = (f: File) => isBookFile(f)
 const isCsv = (f: File) => f.type === 'text/csv' || /\.csv$/i.test(f.name)
 
 export function ImportProvider({ children }: { children: ReactNode }) {
@@ -77,7 +79,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       const pdfs = files.filter(isPdf)
       if (!pdfs.length) {
         if (files.length && !files.some(isCsv))
-          toast({ tone: 'error', message: 'Only PDF files can be added', description: 'Or a reading-list CSV (Notion, Goodreads).' })
+          toast({ tone: 'error', message: 'Only PDF and EPUB files can be added', description: 'Or a reading-list CSV (Notion, Goodreads).' })
         return
       }
       setBusy(true)
@@ -137,7 +139,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       try {
         let first: string | undefined
         for (const f of pdfs) {
-          const a = await analyzePdf(f)
+          const a = await analyzeBookFile(f)
           const id = a.duplicate ? a.duplicate.id : (await addAnalyzedPdf(a, { status: 'reading' })).book.id
           first ??= id
         }
@@ -190,7 +192,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       if (csvs.length) void importFiles(csvs)
       if (pdfs.length) review(pdfs)
       else if (!csvs.length && files.length)
-        toast({ tone: 'error', message: 'Only PDF files can be added', description: 'Or a reading-list CSV (Notion, Goodreads).' })
+        toast({ tone: 'error', message: 'Only PDF and EPUB files can be added', description: 'Or a reading-list CSV (Notion, Goodreads).' })
     }
     window.addEventListener('dragenter', enter)
     window.addEventListener('dragover', over)
@@ -212,7 +214,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
   const browsePdfs = useCallback(() => {
     pickMode.current = 'sheet'
     if (input.current) {
-      input.current.accept = 'application/pdf,.pdf'
+      input.current.accept = BOOK_ACCEPT
       input.current.multiple = true
       input.current.click()
     }
@@ -229,7 +231,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
     pickMode.current = 'attach'
     attachTarget.current = bookId
     if (input.current) {
-      input.current.accept = 'application/pdf,.pdf'
+      input.current.accept = BOOK_ACCEPT
       input.current.multiple = false
       input.current.click()
     }
@@ -241,7 +243,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
       <input
         ref={input}
         type="file"
-        accept="application/pdf,.pdf,text/csv,.csv"
+        accept={`${BOOK_ACCEPT},text/csv,.csv`}
         multiple
         hidden
         onChange={(e) => {

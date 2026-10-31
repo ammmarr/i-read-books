@@ -1,6 +1,7 @@
 import { db, uid, type Book, type BookStatus, type Bookmark, type Highlight, type Recap, type Session, type BookFile, type PageSize } from './db'
 import { closePdf, getPageSizes, openPdf, readMetadata, renderCover } from '../lib/pdf'
-import { readCount } from '../lib/pages'
+import { formatPages, readCount, readPagesOf } from '../lib/pages'
+import { EPUB_MIME, isEpubFile, readEpub } from '../lib/epub'
 
 export class DuplicateBookError extends Error {
   book: Book
@@ -12,7 +13,7 @@ export class DuplicateBookError extends Error {
 
 function titleFromFileName(name: string) {
   return name
-    .replace(/\.pdf$/i, '')
+    .replace(/\.(pdf|epub)$/i, '')
     .replace(/[_]+/g, ' ')
     .replace(/\s*[-–]\s*/g, ' – ')
     .replace(/\s+/g, ' ')
@@ -31,7 +32,7 @@ function usableTitle(t: string) {
 export function titleKey(t: string) {
   return t
     .toLowerCase()
-    .replace(/\.pdf$/, '')
+    .replace(/\.(pdf|epub)$/, '')
     .replace(/\(.*?\)|\[.*?\]/g, ' ')
     .replace(/^(the|a|an)\s+/, '')
     .replace(/['’]/g, '')
@@ -55,7 +56,7 @@ export interface ImportResult {
   attached: boolean
 }
 
-/** Everything read from a PDF before it's added — shown for review in "Add book". */
+/** Everything read from a PDF or EPUB before it's added — shown for review in "Add book". */
 export interface PdfAnalysis {
   file: File
   bytes: Uint8Array
@@ -70,6 +71,32 @@ export interface PdfAnalysis {
   duplicate?: Book
   /** A reading-list entry (no PDF yet) this file looks like. */
   match?: Book
+}
+
+/** A PDF or an EPUB, read for "Add book". */
+export async function analyzeBookFile(file: File): Promise<PdfAnalysis> {
+  return isEpubFile(file) ? analyzeEpub(file) : analyzePdf(file)
+}
+
+async function analyzeEpub(file: File): Promise<PdfAnalysis> {
+  // Its name is how the app knows it's an EPUB (fileName syncs; there's no format field).
+  if (!/\.epub$/i.test(file.name)) file = new File([file], `${file.name}.epub`, { type: EPUB_MIME })
+  const e = await readEpub(file)
+  const duplicate = await db.books.where('fingerprint').equals(e.fingerprint).first()
+  const title = usableTitle(e.title) ? e.title : titleFromFileName(file.name)
+  return {
+    file,
+    bytes: e.bytes,
+    fingerprint: e.fingerprint,
+    title,
+    author: e.author,
+    pageCount: e.pageCount,
+    pageSizes: [],
+    cover: e.cover,
+    tint: e.tint,
+    duplicate,
+    match: duplicate ? undefined : await findListEntry(title, file.name),
+  }
 }
 
 export async function analyzePdf(file: File): Promise<PdfAnalysis> {
@@ -121,7 +148,7 @@ export async function addAnalyzedPdf(
     coverPath: undefined,
     uploadError: undefined,
   }
-  const blob = new Blob([a.bytes as BlobPart], { type: 'application/pdf' })
+  const blob = new Blob([a.bytes as BlobPart], { type: isEpubFile(a.file) ? EPUB_MIME : 'application/pdf' })
 
   // A PDF for a book already on your reading list fills in that entry.
   const entryId = opts.attachTo === null ? undefined : (opts.attachTo ?? a.match?.id)
@@ -162,7 +189,7 @@ export async function addAnalyzedPdf(
 }
 
 export async function importPdf(file: File, { attachTo }: { attachTo?: string } = {}): Promise<ImportResult> {
-  return addAnalyzedPdf(await analyzePdf(file), { attachTo })
+  return addAnalyzedPdf(await analyzeBookFile(file), { attachTo })
 }
 
 export class DuplicateTitleError extends Error {
@@ -300,6 +327,38 @@ export async function renameBook(id: string, title: string, author: string) {
 }
 
 /** Progress 0–1 based on the furthest page reached. */
+/**
+ * A page read on its own ("7", not part of a run like "15-16") used to be dropped whenever the
+ * record was read back (lib/pages parsePages), so progress could quietly shrink. Sessions remember
+ * the pages they read: put those back, once per device. Pages set by hand since stay as set.
+ */
+export async function repairReadPages() {
+  const KEY = 'irb-readpages-repair-1'
+  try {
+    if (localStorage.getItem(KEY)) return
+  } catch {
+    return
+  }
+  for (const b of await db.books.toArray()) {
+    if (!b.pageCount) continue
+    const set = readPagesOf(b)
+    const before = set.size
+    const since = b.readPagesSetAt ?? 0
+    await db.sessions
+      .where('bookId')
+      .equals(b.id)
+      .each((s) => {
+        if (s.start >= since) for (const p of s.pages ?? []) if (p >= 0 && p < b.pageCount) set.add(p)
+      })
+    if (set.size > before) await db.books.update(b.id, { readPages: formatPages(set), furthestPage: Math.max(b.furthestPage, ...set) })
+  }
+  try {
+    localStorage.setItem(KEY, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
 export function bookProgress(b: Pick<Book, 'furthestPage' | 'pageCount' | 'status' | 'readPages'>) {
   if (b.status === 'finished') return 1
   if (b.pageCount <= 1) return 0

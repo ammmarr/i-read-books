@@ -5,6 +5,7 @@ import {
 } from '../db/db'
 import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
 import { formatPages, readPagesOf } from './pages'
+import { bookExt, bookMime } from './epub'
 import { kindFromId } from './recaps'
 import { SYNCED_SETTINGS, getSettings, getSettingsMeta, setSettingsChangeListener, setSettingsMeta, updateSettings, type Settings } from './settings'
 
@@ -495,7 +496,7 @@ async function push(userId: string) {
         const { error } = await sb.from(REMOTE[t]).update({ deleted: true, updated_at: Date.now() }).in('id', chunk)
         if (error) throw isAuthRefusal(error) ? new SignInError() : error
         if (t === 'books') {
-          await sb.storage.from(BUCKET).remove(chunk.flatMap((id) => [`${userId}/${id}.pdf`, `${userId}/${id}.jpg`]))
+          await sb.storage.from(BUCKET).remove(chunk.flatMap((id) => [`${userId}/${id}.pdf`, `${userId}/${id}.epub`, `${userId}/${id}.jpg`]))
         }
       }
     }
@@ -504,7 +505,7 @@ async function push(userId: string) {
   }
 }
 
-/** Upload PDFs and covers that only exist on this device. Returns true if anything changed. */
+/** Upload book files (PDF or EPUB) and covers that only exist on this device. Returns true if anything changed. */
 async function uploadFiles(userId: string) {
   const sb = supabase!
   let changed = false
@@ -518,8 +519,8 @@ async function uploadFiles(userId: string) {
         if (file.blob.size > MAX_UPLOAD) {
           await localOnlyUpdate(b.id, { uploadError: 'too-large' })
         } else {
-          const path = `${userId}/${b.id}.pdf`
-          const { error } = await sb.storage.from(BUCKET).upload(path, file.blob, { upsert: true, contentType: 'application/pdf' })
+          const path = `${userId}/${b.id}.${bookExt(b)}`
+          const { error } = await sb.storage.from(BUCKET).upload(path, file.blob, { upsert: true, contentType: bookMime(b) })
           if (error) await localOnlyUpdate(b.id, { uploadError: error.message })
           else {
             await db.books.update(b.id, { filePath: path })
@@ -672,7 +673,7 @@ export async function downloadBookFile(book: Book, onProgress?: (fraction: numbe
     got += value.length
     if (total) onProgress?.(Math.min(1, got / total))
   }
-  const blob = new Blob(parts as BlobPart[], { type: 'application/pdf' })
+  const blob = new Blob(parts as BlobPart[], { type: bookMime(book) })
   await db.files.put({ id: book.id, blob })
   return blob
 }

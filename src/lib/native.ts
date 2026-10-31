@@ -1,4 +1,5 @@
 import { Capacitor, SystemBars, SystemBarsStyle } from '@capacitor/core'
+import { EPUB_MIME } from './epub'
 
 /** True inside the Android app (Capacitor), false in the browser / installed PWA. */
 export const isNative = Capacitor.isNativePlatform()
@@ -56,8 +57,12 @@ export async function initNative() {
       const res = await fetch(Capacitor.convertFileSrc(url))
       const blob = await res.blob()
       let name = decodeURIComponent(url.split('/').pop() ?? 'Book').replace(/[?#].*$/, '')
-      if (!/\.pdf$/i.test(name)) name += '.pdf'
-      const file = new File([blob], name, { type: 'application/pdf' })
+      // An EPUB is a zip whose first entry names its type; anything else is taken as a PDF.
+      const head = new TextDecoder().decode(new Uint8Array(await blob.slice(0, 64).arrayBuffer()))
+      const epub = blob.type === EPUB_MIME || /\.epub$/i.test(name) || (head.startsWith('PK') && head.includes(EPUB_MIME))
+      if (epub && !/\.epub$/i.test(name)) name += '.epub'
+      if (!epub && !/\.pdf$/i.test(name)) name += '.pdf'
+      const file = new File([blob], name, { type: epub ? EPUB_MIME : 'application/pdf' })
       window.dispatchEvent(new CustomEvent('irb-open-file', { detail: file }))
     } catch (e) {
       console.warn('could not open shared file', e)
