@@ -413,12 +413,12 @@ function EmptyLibrary({ onAdd }: { onAdd: () => void }) {
       </div>
       <h1 className="text-heading-lg text-ink">Your shelf is waiting</h1>
       <p className="mt-3 max-w-md text-body-lg text-body">
-        Add a PDF to start reading. Everything — books, highlights, reading time — stays privately on this device.
+        Add a PDF or EPUB to start reading. Everything — books, highlights, reading time — stays privately on this device.
       </p>
       <Button size="lg" className="mt-8" onClick={onAdd}>
         <Plus className="size-4" /> Add your first book
       </Button>
-      {!touch && <p className="mt-4 text-body-sm text-faint">or drop PDF files anywhere on this window</p>}
+      {!touch && <p className="mt-4 text-body-sm text-faint">or drop PDF or EPUB files anywhere on this window</p>}
     </PageContainer>
   )
 }

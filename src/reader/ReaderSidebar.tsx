@@ -39,6 +39,8 @@ interface Props {
   recapSection: Chapter | null
   sections: Chapter[]
   onRecap: (c: Chapter) => void
+  /** Instead of the PDF outline (an EPUB's contents go by link, not by page). */
+  contents?: React.ReactNode
 }
 
 export function ReaderSidebar(p: Props) {
@@ -65,7 +67,7 @@ export function ReaderSidebar(p: Props) {
           transition={{ duration: 0.18 }}
           className="px-2 py-3"
         >
-          {p.tab === 'contents' && <Contents {...p} />}
+          {p.tab === 'contents' && (p.contents ?? <Contents {...p} />)}
           {p.tab === 'highlights' && <Highlights {...p} />}
           {p.tab === 'bookmarks' && <Bookmarks {...p} />}
         </motion.div>

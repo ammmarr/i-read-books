@@ -189,7 +189,7 @@ function PdfRow({ item, onChange, onRemove }: { item: Item; onChange: (p: Partia
         {item.state === 'error' && (
           <div className="pt-1 text-body-sm text-error">
             <CircleAlert className="mr-1 inline size-3.5" />
-            Couldn’t open {item.file.name}. It may be damaged or password-protected.
+            Couldn’t open {item.file.name}. It may be damaged, password-protected or copy-protected (DRM).
           </div>
         )}
         {item.state === 'ready' && item.a && (

@@ -148,7 +148,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
         if (pdfs.length > 1) toast({ message: `${pdfs.length} books opened`, description: 'The rest are in your library.' })
       } catch (e) {
         console.error(e)
-        toast({ id: 'open-file', tone: 'error', message: 'Couldn’t open that PDF', description: 'It may be damaged or password-protected.' })
+        toast({ id: 'open-file', tone: 'error', message: 'Couldn’t open that book', description: 'It may be damaged, password-protected or copy-protected (DRM).' })
       }
     },
     [toast, dismiss, navigate],
@@ -299,7 +299,7 @@ export function ImportProvider({ children }: { children: ReactNode }) {
               </motion.div>
               <div className="text-center">
                 <p className="text-heading-md text-ink">Drop to add to your library</p>
-                <p className="mt-1 text-body-md text-mute">PDF books, or a reading-list CSV</p>
+                <p className="mt-1 text-body-md text-mute">PDFs, EPUBs, or a reading-list CSV</p>
               </div>
             </motion.div>
           </motion.div>

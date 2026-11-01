@@ -77,11 +77,27 @@ function onData(e: Event) {
     .catch(() => '')
 }
 
+/**
+ * Store DRM encrypts a book's pages, which would show as gibberish. (Fonts may be
+ * lightly scrambled in any EPUB, by these two standard methods; that's not DRM.)
+ */
+const FONT_SCRAMBLING = ['http://www.idpf.org/2008/embedding', 'http://ns.adobe.com/pdf/enc#RC']
+async function isCopyProtected(book: FoliateBook) {
+  const xml = await Promise.resolve(book.loadText?.('META-INF/encryption.xml')).catch(() => null)
+  if (!xml) return false
+  const doc = new DOMParser().parseFromString(xml, 'application/xml')
+  return [...doc.getElementsByTagNameNS('*', 'EncryptedData')].some((d) => {
+    const how = d.getElementsByTagNameNS('*', 'EncryptionMethod')[0]?.getAttribute('Algorithm') ?? ''
+    return !FONT_SCRAMBLING.includes(how)
+  })
+}
+
 /** Opens an EPUB for reading or for its details. Every page it shows goes through sanitizeDoc. */
 export async function openEpub(blob: Blob, name = 'book.epub'): Promise<FoliateBook> {
   const { makeBook } = await import('foliate-js/view.js')
   const book = await makeBook(new File([blob], /\.epub$/i.test(name) ? name : `${name}.epub`, { type: EPUB_MIME }))
   if (!book.transformTarget) throw new Error('not-epub')
+  if (await isCopyProtected(book)) throw new Error('drm')
   book.transformTarget.addEventListener('data', onData)
   return book
 }

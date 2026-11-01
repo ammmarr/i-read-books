@@ -8,9 +8,13 @@ import { CHARS_PER_LOC } from '../lib/epub'
  *
  * Each chapter is laid out in page-sized columns (CSS columns, so lines never
  * split across pages), and each page on screen is a frame onto one column. Only
- * the pages near the screen are mounted, like the PDF reader's. Chapters are
+ * the pages near the screen are mounted, like the PDF reader's, and a frame
+ * leaving the screen is reused for the next page of its chapter. Chapters are
  * measured in the background (a hidden frame) to know their page counts; until
  * then they're estimated, and the scroll stays put when a count corrects.
+ *
+ * Fixed-layout books (comics, some picture books) are one designed page per
+ * section: each is scaled to fit a page instead of being laid out in columns.
  *
  * foliate-js still reads the book (sections, contents, CFIs, search); this
  * replaces only its renderer. Book pages run in sandboxed frames without
@@ -38,6 +42,27 @@ export interface ScrollLocation {
   cfi: string
 }
 
+/** A note a link points to, shown in a card rather than by going there. */
+export interface NoteCard {
+  text: string
+  /** Where it is in the book, when that's somewhere you can scroll to. */
+  target: string | null
+}
+
+export interface SearchHit {
+  cfi: string
+  excerpt: { pre: string; match: string; post: string }
+  /** The location it's at (about: it's worked out from the text, without laying the chapter out). */
+  page: number
+}
+
+/**
+ * Where a jump puts its target: at the very top (laid out again, you stay exactly
+ * where you were), just below the top bar (your spot, a chapter, a link), or a third
+ * of the way down the screen (a highlight or a search hit, to read in context).
+ */
+export type Landing = 'top' | 'bar' | 'middle'
+
 interface Section {
   index: number
   size: number
@@ -45,7 +70,6 @@ interface Section {
   before: number
   pages: number
   measured: boolean
-  url?: string | null
 }
 
 interface Mounted {
@@ -54,15 +78,26 @@ interface Mounted {
   s: number
   p: number
   doc?: Document
+  gone?: boolean
 }
 
 type Anchor = (doc: Document) => Range | Element | number | null | undefined
+
+interface TocEntry {
+  label: string
+  href: string
+  anchor: Anchor
+  /** Where it starts in its chapter, in pages. Unknown until the chapter's laid out, if it's partway through. */
+  pos: number | null
+}
 
 const GAP = 18 // between pages
 /** Room above the first page and below the last, clear of the bars (as in the PDF reader). */
 const PAD_TOP = 64
 const PAD_BOTTOM = 96
 const BASE_PX = 18.5
+/** A note card shows a short note; something longer behind a superscript is a real section, to go to. */
+const NOTE_MAX = 1500
 const HL_RGB: Record<HighlightColor, string> = {
   yellow: '252, 211, 77',
   green: '110, 231, 160',
@@ -70,6 +105,55 @@ const HL_RGB: Record<HighlightColor, string> = {
   pink: '249, 154, 200',
   purple: '185, 164, 251',
 }
+
+const OPS = 'http://www.idpf.org/2007/ops'
+const typesOf = (el: Element) => new Set((el.getAttributeNS(OPS, 'type') ?? el.getAttribute('epub:type') ?? '').split(/\s+/).filter(Boolean))
+const rolesOf = (el: Element) => new Set((el.getAttribute('role') ?? '').split(/\s+/).filter(Boolean))
+const NOTE_TYPES = ['footnote', 'endnote', 'rearnote', 'note']
+const NOTE_ROLES = ['doc-footnote', 'doc-endnote', 'note']
+
+/** Is this element (or something around it) a footnote or endnote? */
+function isNoteTarget(el: Element | null) {
+  for (let e = el; e && e.localName !== 'body'; e = e.parentElement) {
+    const t = typesOf(e)
+    const r = rolesOf(e)
+    if (NOTE_TYPES.some((x) => t.has(x)) || NOTE_ROLES.some((x) => r.has(x))) return true
+  }
+  return false
+}
+/** The book says this link is a reference to a note. */
+const saysNoteRef = (a: Element) => {
+  const t = typesOf(a)
+  const r = rolesOf(a)
+  return ['noteref', 'biblioref', 'glossref'].some((x) => t.has(x)) || ['doc-noteref', 'doc-biblioref', 'doc-glossref'].some((x) => r.has(x))
+}
+/** A little raised number, which is how most books write a note reference without saying so. */
+const looksLikeNoteRef = (a: Element) => {
+  const t = typesOf(a)
+  const r = rolesOf(a)
+  if (t.has('backlink') || r.has('doc-backlink')) return false
+  if (!(a.closest('sup') || a.querySelector('sup') || getComputedStyle(a).verticalAlign === 'super')) return false
+  // Starting its own paragraph, it's a note's number linking back to the text.
+  const block = a.closest('p, li, div, aside, td')
+  return !block?.textContent?.trim().startsWith(a.textContent?.trim() ?? '')
+}
+/** A note's box: the paragraph or list item around its anchor. */
+function noteBox(el: Element) {
+  let e = el
+  while (e.matches('a, span, sup, sub, em, strong, i, b, small, big') && e.parentElement) e = e.parentElement
+  if (e.localName === 'body') return el.nextElementSibling ?? el
+  return e
+}
+/** A note's words, paragraphs kept, its link back to the text (an arrow, no words) left out. */
+function noteText(box: Element) {
+  const copy = box.cloneNode(true) as Element
+  for (const a of copy.querySelectorAll('a')) if (typesOf(a).has('backlink') || rolesOf(a).has('doc-backlink') || !/[\p{L}\p{N}]/u.test(a.textContent ?? '')) a.remove()
+  const tidy = (s: string | null) => (s ?? '').replace(/\s+/g, ' ').trim()
+  const parts = [...copy.querySelectorAll('p')].map((p) => tidy(p.textContent)).filter(Boolean)
+  return parts.length ? parts.join(String.fromCharCode(10, 10)) : tidy(copy.textContent)
+}
+
+const rectOf = (a: Range | Element) => ('startContainer' in a ? (a.getClientRects()[0] ?? a.getBoundingClientRect()) : a.getBoundingClientRect())
 
 type CFIModule = typeof import('foliate-js/epubcfi.js') & {
   joinIndir: (...xs: string[]) => string
@@ -83,6 +167,7 @@ export class EpubScroller extends EventTarget {
   private measurer: HTMLIFrameElement
   private book: FoliateBook
   private look: PageLook
+  private fixed: boolean
   private sections: Section[] = []
   /** Section index → position in `sections`. */
   private pos = new Map<number, number>()
@@ -91,17 +176,27 @@ export class EpubScroller extends EventTarget {
   private totalPages = 0
   private geo = { pageW: 600, pageH: 840, padX: 48, padY: 56, textW: 504, textH: 728, colGap: 40, left: 0, zoom: 1 }
   private mounted = new Map<number, Mounted>()
+  private urls = new Map<number, string | null>()
   private queue: number[] = []
   private measuring = false
   private measuredDoc: { index: number; doc: Document } | null = null
+  /** The hidden frame holds one chapter at a time, so its users take turns. */
+  private measurerTurn: Promise<unknown> = Promise.resolve()
+  /** Bumped when the layout changes: a measurement from before it doesn't count. */
+  private layoutGen = 0
+  /** Bumped by each jump: only the latest one lands. */
+  private jump = 0
   private annotations = new Map<string, HighlightColor>()
-  private searchCfis: string[] = []
+  private searchId = 0
+  private searchHits = new Map<number, string[]>()
+  private searchCurrent: string | null = null
   private marks = new WeakMap<Document, { cfi: string; range: Range }[]>()
   private cfi?: CFIModule
-  private tocBySection = new Map<number, { label: string; href: string }>()
+  private tocBySection = new Map<number, TocEntry[]>()
   private ro: ResizeObserver
   private frameT = 0
   private relocT: ReturnType<typeof setTimeout> | undefined
+  private relayoutT: ReturnType<typeof setTimeout> | undefined
   private width = 0
   private cursorHidden = false
   private closed = false
@@ -111,8 +206,9 @@ export class EpubScroller extends EventTarget {
     super()
     this.book = book
     this.look = look
+    this.fixed = book.rendition?.layout === 'pre-paginated'
     this.el = document.createElement('div')
-    this.el.style.cssText = `position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;background:${look.desk}`
+    this.el.style.cssText = `position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;touch-action:pan-x pan-y;background:${look.desk}`
     this.content = document.createElement('div')
     this.content.style.cssText = 'position:relative;width:100%'
     this.el.append(this.content)
@@ -129,7 +225,7 @@ export class EpubScroller extends EventTarget {
       .map((s, index) => ({ s, index }))
       .filter(({ s }) => s.linear !== 'no' && s.size > 0)
       .map(({ s, index }) => {
-        const sec: Section = { index, size: s.size, before: at, pages: 1, measured: false }
+        const sec: Section = { index, size: s.size, before: at, pages: 1, measured: this.fixed }
         at += s.size
         return sec
       })
@@ -139,12 +235,14 @@ export class EpubScroller extends EventTarget {
     this.el.addEventListener('scroll', () => this.onScroll(), { passive: true })
     this.ro = new ResizeObserver(() => {
       const w = this.el.clientWidth
-      if (w && Math.abs(w - this.width) > 1) this.relayout()
+      if (w && Math.abs(w - this.width) > 1) this.relayoutSoon()
+      else this.render()
     })
   }
 
   // ── Opening ───────────────────────────────────────────────────────────
   async open() {
+    if (!this.sections.length) throw new Error('This book has no readable pages')
     this.cfi = (await import('foliate-js/epubcfi.js')) as unknown as CFIModule
     await this.buildToc()
     this.layoutGeometry()
@@ -156,24 +254,31 @@ export class EpubScroller extends EventTarget {
   close() {
     this.closed = true
     this.ro.disconnect()
-    for (const m of this.mounted.values()) m.el.remove()
+    clearTimeout(this.relocT)
+    clearTimeout(this.relayoutT)
+    for (const m of this.mounted.values()) this.drop(m)
     this.mounted.clear()
     this.el.remove()
   }
 
   private async buildToc() {
-    const flat: FoliateTocItem[] = []
-    const walk = (xs: FoliateTocItem[] | null | undefined) => (xs ?? []).forEach((x) => (flat.push(x), walk(x.subitems)))
-    walk(this.book.toc)
-    const book = this.book as FoliateBook & { resolveHref?: (h: string) => { index: number } | null }
-    for (const it of flat) {
-      try {
-        const r = it.href ? book.resolveHref?.(it.href) : null
-        if (r && r.index >= 0 && !this.tocBySection.has(r.index)) this.tocBySection.set(r.index, { label: it.label?.trim() ?? '', href: it.href })
-      } catch {
-        /* a broken contents entry */
+    const book = this.book as FoliateBook & { resolveHref?: (h: string) => { index: number; anchor: Anchor } | null }
+    const walk = (xs: FoliateTocItem[] | null | undefined) => {
+      for (const it of xs ?? []) {
+        try {
+          const r = it.href ? book.resolveHref?.(it.href) : null
+          if (r && r.index >= 0) {
+            const list = this.tocBySection.get(r.index) ?? []
+            list.push({ label: it.label?.trim() ?? '', href: it.href, anchor: r.anchor, pos: it.href.includes('#') ? null : 0 })
+            this.tocBySection.set(r.index, list)
+          }
+        } catch {
+          /* a broken contents entry */
+        }
+        walk(it.subitems)
       }
     }
+    walk(this.book.toc)
   }
 
   // ── Look and geometry ─────────────────────────────────────────────────
@@ -183,9 +288,10 @@ export class EpubScroller extends EventTarget {
     this.el.style.background = look.desk
     for (const m of this.mounted.values()) {
       m.el.style.background = look.page
-      if (m.doc) this.styleDoc(m.doc)
+      // A new size or width lays everything out again in a moment; restyling first would show the wrong column.
+      if (m.doc && !relayout) this.styleDoc(m.doc)
     }
-    if (relayout) this.relayout()
+    if (relayout) this.relayoutSoon()
   }
 
   private layoutGeometry() {
@@ -198,8 +304,8 @@ export class EpubScroller extends EventTarget {
     const zoom = this.look.wide ? Math.max(1, (w - side * 2) / baseW) : 1
     const pageW = Math.round(baseW * zoom)
     const pageH = Math.round(baseW * 1.414 * zoom)
-    const padX = Math.round(Math.max(22, Math.min(84, baseW * 0.11)) * zoom)
-    const padY = Math.round(Math.max(30, Math.min(84, baseW * 1.414 * 0.065)) * zoom)
+    const padX = this.fixed ? 0 : Math.round(Math.max(22, Math.min(84, baseW * 0.11)) * zoom)
+    const padY = this.fixed ? 0 : Math.round(Math.max(30, Math.min(84, baseW * 1.414 * 0.065)) * zoom)
     this.geo = { pageW, pageH, padX, padY, textW: pageW - padX * 2, textH: pageH - padY * 2, colGap: padX * 2, left: Math.round((w - pageW) / 2), zoom }
   }
 
@@ -254,19 +360,31 @@ export class EpubScroller extends EventTarget {
     this.el.scrollTop = this.pageTop(this.starts[a.k] + p) + a.off * this.geo.pageH
   }
 
+  /** Dragging a window's edge or stepping the text size sends many changes: lay out once they stop. */
+  private relayoutSoon() {
+    clearTimeout(this.relayoutT)
+    this.relayoutT = setTimeout(() => this.relayout(), 120)
+  }
+
   /** Text size, width or the screen changed: everything is laid out again, and you stay where you were. */
   private relayout() {
+    if (this.closed) return
     const cfi = this.lastLocation?.cfi
     const frac = this.lastLocation?.fraction
     this.layoutGeometry()
-    for (const s of this.sections) s.measured = false
+    this.layoutGen++
+    for (const s of this.sections) {
+      s.measured = this.fixed
+      if (this.fixed) s.pages = 1
+    }
     this.measuredDoc = null
-    for (const m of this.mounted.values()) m.el.remove()
+    for (const list of this.tocBySection.values()) for (const t of list) if (t.href.includes('#')) t.pos = null
+    for (const m of this.mounted.values()) this.drop(m)
     this.mounted.clear()
     this.estimate()
     this.applyHeights()
-    if (cfi) void this.goTo(cfi)
-    else if (frac != null) void this.goToFraction(frac)
+    const back = cfi ? this.goTo(cfi, 'top') : frac != null ? this.goToFraction(frac) : Promise.resolve()
+    void back.finally(() => this.render())
     this.measureAll()
   }
 
@@ -283,27 +401,46 @@ export class EpubScroller extends EventTarget {
         overflow: hidden !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;
         font-size: ${(BASE_PX * L.size * this.geo.zoom) / 100}px !important; -webkit-text-size-adjust: none; text-size-adjust: none;
         background: transparent !important; color: ${L.fg} !important; color-scheme: ${L.dark ? 'dark' : 'light'};
+        touch-action: pan-x pan-y;
       }
-      body { margin: 0 !important; padding: 0 !important; background: transparent !important; color: inherit !important; line-height: 1.72 !important; }
-      /* Your text size wins over the book's own (many books fix it in px or pt). */
-      body, section, article, div, p, li, dd, dt, blockquote, td, th, pre { font-size: 1rem !important; }
+      body {
+        margin: 0 !important; padding: 0 !important; background: transparent !important; color: inherit !important; line-height: 1.72 !important;
+        width: auto !important; max-width: none !important; height: auto !important; min-height: 0 !important; overflow: visible !important;
+        overflow-wrap: break-word;
+      }
+      /* Your text size wins over the book's own (many books fix it in px or pt, right down to single words). */
+      body, section, article, div, p, li, dd, dt, dl, ol, ul, blockquote, table, tbody, thead, tfoot, tr, td, th, caption, pre,
+      figure, figcaption, aside, header, footer, main, nav, center, address, label { font-size: 1rem !important; }
+      span, a, em, i, b, strong, u, s, cite, q, abbr, code, kbd, samp, var, font, big, mark, ins, del { font-size: inherit !important; }
       h1 { font-size: 1.6rem !important; } h2 { font-size: 1.4rem !important; } h3 { font-size: 1.22rem !important; }
       h4, h5, h6 { font-size: 1.08rem !important; }
       small, sub, sup { font-size: 0.8em !important; }
       p, li, dd, dt, blockquote, div { line-height: 1.72 !important; }
       p { margin-top: 0 !important; margin-bottom: 0.9em !important; widows: 2; orphans: 2; }
       h1, h2, h3, h4, h5, h6 { line-height: 1.3 !important; margin: 1.2em 0 0.65em !important; break-after: avoid; }
-      img, svg, video { max-width: 100% !important; max-height: ${textH}px !important; height: auto; object-fit: contain; break-inside: avoid; }
-      table { max-width: 100%; }
+      /* Nothing wider than the page: it would run over the next page's text. */
+      body * { max-width: 100% !important; }
+      img, svg, video { max-height: ${textH}px !important; height: auto; object-fit: contain; break-inside: avoid; }
+      table { width: auto !important; table-layout: auto !important; }
+      td, th { overflow-wrap: anywhere; }
       pre { white-space: pre-wrap !important; }
       ${L.dark ? 'body * { color: inherit !important; background-color: transparent !important; }' : ''}
       a:link, a:visited { color: ${L.link} !important; }
       aside[epub|type~="footnote"], aside[epub|type~="endnote"], aside[epub|type~="note"], aside[epub|type~="rearnote"] { display: none !important; }
       ::selection { background: ${L.dark ? 'rgba(124, 184, 255, .35)' : 'rgba(0, 112, 243, .2)'}; }
       ${Object.entries(HL_RGB).map(([c, rgb]) => `::highlight(irb-${c}) { background-color: rgba(${rgb}, ${a}); }`).join('\n')}
-      ::highlight(irb-search) { background-color: rgba(0, 112, 243, ${L.dark ? 0.35 : 0.22}); }
+      ::highlight(irb-search) { background-color: rgba(255, 170, 0, ${L.dark ? 0.26 : 0.3}); }
+      ::highlight(irb-search-current) { background-color: rgba(255, 140, 0, ${L.dark ? 0.6 : 0.62}); }
       html.irb-nocursor, html.irb-nocursor * { cursor: none !important; }
       html.irb-lookup, html.irb-lookup * { cursor: help !important; }
+    `
+  }
+
+  /** Fixed-layout pages keep their design: only what lets them sit in the frame. */
+  private fixedCss() {
+    return `
+      html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+      html.irb-nocursor, html.irb-nocursor * { cursor: none !important; }
     `
   }
 
@@ -314,11 +451,28 @@ export class EpubScroller extends EventTarget {
       st.id = 'irb-style'
       ;(doc.head ?? doc.documentElement).append(st)
     }
-    st.textContent = this.docCss()
+    st.textContent = this.fixed ? this.fixedCss() : this.docCss()
     const root = doc.documentElement
-    if (!root.lang) root.lang = (this.book.metadata?.language as string | undefined) ?? ''
+    if (!root.lang) root.lang = ([this.book.metadata?.language].flat()[0] as string | undefined) ?? ''
     if (!root.dir && this.book.dir) root.dir = this.book.dir
     root.classList.toggle('irb-nocursor', this.cursorHidden)
+  }
+
+  /** A fixed-layout page, scaled to fit its place on the desk. */
+  private fitFixed(m: Mounted, doc: Document) {
+    const vp = doc.querySelector('meta[name="viewport"]')?.getAttribute('content') ?? ''
+    const num = (k: string) => Number(new RegExp(`${k}\\s*=\\s*([\\d.]+)`).exec(vp)?.[1] ?? 0)
+    const se = doc.scrollingElement ?? doc.documentElement
+    const img = doc.querySelector('img') as HTMLImageElement | null
+    const w = num('width') || img?.naturalWidth || se.scrollWidth || this.geo.pageW
+    const h = num('height') || img?.naturalHeight || se.scrollHeight || this.geo.pageH
+    const scale = Math.min(this.geo.pageW / w, this.geo.pageH / h)
+    m.frame.style.width = `${w}px`
+    m.frame.style.height = `${h}px`
+    m.frame.style.left = `${Math.round((this.geo.pageW - w * scale) / 2)}px`
+    m.frame.style.top = `${Math.round((this.geo.pageH - h * scale) / 2)}px`
+    m.frame.style.transformOrigin = 'top left'
+    m.frame.style.transform = `scale(${scale})`
   }
 
   private rtl(doc: Document) {
@@ -327,8 +481,10 @@ export class EpubScroller extends EventTarget {
 
   /** Show column `p` of a laid-out chapter. */
   private showColumn(doc: Document, p: number) {
+    if (this.fixed) return
     const se = doc.scrollingElement ?? doc.documentElement
     const step = this.geo.textW + this.geo.colGap
+    se.scrollTop = 0
     se.scrollLeft = (this.rtl(doc) ? -1 : 1) * p * step
   }
 
@@ -337,22 +493,37 @@ export class EpubScroller extends EventTarget {
     return Math.max(1, Math.round((se.scrollWidth + this.geo.colGap) / (this.geo.textW + this.geo.colGap)))
   }
 
-  /** Which column (page) a spot in a laid-out chapter is on, and how far down it. */
+  /** Which column (page) a spot in a laid-out chapter is on, and how far down it. `rect` is from column 0's corner. */
   private columnOf(doc: Document, rect: DOMRect) {
     const step = this.geo.textW + this.geo.colGap
     const k = this.rtl(doc) ? Math.floor((-rect.left + this.geo.textW) / step) : Math.floor(rect.left / step)
     return { p: Math.max(0, k), y: Math.max(0, rect.top) }
   }
 
-  private async urlOf(s: Section) {
-    if (s.url === undefined) {
+  private async urlOf(index: number) {
+    if (!this.urls.has(index)) {
       try {
-        s.url = (await (this.book.sections[s.index] as unknown as { load: () => Promise<string | null> }).load()) ?? null
+        this.urls.set(index, (await (this.book.sections[index] as unknown as { load: () => Promise<string | null> }).load()) ?? null)
       } catch {
-        s.url = null
+        this.urls.set(index, null)
       }
     }
-    return s.url
+    return this.urls.get(index) ?? null
+  }
+
+  /** A section's text as it's shown (cleaned), in a document that isn't laid out: for searching and for notes. */
+  private async parsed(index: number) {
+    const url = await this.urlOf(index)
+    if (!url) return null
+    try {
+      const res = await fetch(url)
+      const type = (res.headers.get('content-type') ?? 'application/xhtml+xml').split(';')[0].trim() as DOMParserSupportedType
+      const text = await res.text()
+      const doc = new DOMParser().parseFromString(text, type)
+      return doc.querySelector('parsererror') ? new DOMParser().parseFromString(text, 'text/html') : doc
+    } catch {
+      return null
+    }
   }
 
   private loadFrame(frame: HTMLIFrameElement, url: string) {
@@ -362,30 +533,38 @@ export class EpubScroller extends EventTarget {
         resolve(frame.contentDocument)
       }
       frame.addEventListener('load', done)
-      frame.src = url
+      // replace, not src: each new src would add a step to the browser's history, and Back
+      // (the reader's button, Android's) would step through the hidden frame instead of leaving.
+      if (frame.contentWindow) frame.contentWindow.location.replace(url)
+      else frame.src = url
     })
   }
 
   // ── Measuring chapters ────────────────────────────────────────────────
-  /** Lays a chapter out in the hidden frame and counts its pages. */
+  /** Lays a chapter out in the hidden frame and counts its pages. Call it through inMeasurer. */
   private async measure(k: number): Promise<Document | null> {
     const s = this.sections[k]
-    if (!s) return null
+    if (!s || this.fixed) return null
     if (this.measuredDoc?.index === s.index && s.measured) return this.measuredDoc.doc
-    const url = await this.urlOf(s)
+    const gen = this.layoutGen
+    const url = await this.urlOf(s.index)
     if (!url || this.closed) return null
     const { textW, textH } = this.geo
     this.measurer.style.width = `${textW}px`
     this.measurer.style.height = `${textH}px`
+    this.measuredDoc = null
     const doc = await this.loadFrame(this.measurer, url)
     if (!doc || this.closed) return null
     this.styleDoc(doc)
     await Promise.race([doc.fonts?.ready, new Promise((r) => setTimeout(r, 800))])
+    // The size or the screen changed meanwhile: this count is for the old layout.
+    if (gen !== this.layoutGen || this.closed) return null
     const pages = this.columnsOf(doc)
     this.measuredDoc = { index: s.index, doc }
-    if (!s.measured || s.pages !== pages) {
+    this.placeToc(s, doc)
+    const changed = s.pages !== pages
+    if (!s.measured || changed) {
       const a = this.anchorNow()
-      const changed = s.pages !== pages
       s.pages = pages
       s.measured = true
       if (changed) {
@@ -398,8 +577,38 @@ export class EpubScroller extends EventTarget {
     return doc
   }
 
+  /**
+   * Use a chapter's laid-out document. The hidden frame shows one chapter at a time: a second load
+   * would take over the first's frame (and the first would count the wrong chapter's pages), so its
+   * users take turns. A jump that's been overtaken by a newer one doesn't load anything.
+   */
+  private inMeasurer<T>(k: number, use: (doc: Document | null) => T, jump?: number): Promise<T> {
+    const turn = this.measurerTurn.then(async () => use(jump != null && jump !== this.jump ? null : await this.measure(k)))
+    this.measurerTurn = turn.catch(() => {})
+    return turn
+  }
+
+  /** Where this chapter's contents entries are (one file can hold many chapters). */
+  private placeToc(s: Section, doc: Document) {
+    for (const t of this.tocBySection.get(s.index) ?? []) {
+      if (!t.href.includes('#')) continue
+      try {
+        const a = t.anchor(doc)
+        if (!a || typeof a !== 'object') {
+          t.pos = 0
+          continue
+        }
+        const { p, y } = this.columnOf(doc, rectOf(a))
+        t.pos = p + y / this.geo.textH
+      } catch {
+        t.pos = 0
+      }
+    }
+  }
+
   /** Measure every chapter, the ones near you first, a little at a time. */
   measureAll() {
+    if (this.fixed) return
     const here = this.lastLocation ? (this.pos.get(this.lastLocation.section.current) ?? 0) : 0
     const order = this.sections.map((_, k) => k).sort((a, b) => Math.abs(a - here) - Math.abs(b - here))
     this.queue = order
@@ -411,7 +620,7 @@ export class EpubScroller extends EventTarget {
     this.measuring = true
     while (this.queue.length && !this.closed) {
       const k = this.queue.shift()!
-      if (!this.sections[k].measured) await this.measure(k)
+      if (!this.sections[k].measured) await this.inMeasurer(k, () => {})
       await new Promise((r) => setTimeout(r, 15))
     }
     this.measuring = false
@@ -428,6 +637,11 @@ export class EpubScroller extends EventTarget {
     this.relocT = setTimeout(() => this.relocate(), 120)
   }
 
+  private drop(m: Mounted) {
+    m.gone = true
+    m.el.remove()
+  }
+
   /** Mount the pages near the screen; let go of the rest. */
   render() {
     if (this.closed || !this.totalPages) return
@@ -436,13 +650,34 @@ export class EpubScroller extends EventTarget {
     const h = this.el.clientHeight || window.innerHeight
     const first = Math.max(0, Math.floor((y - h * 0.75 - PAD_TOP) / (pageH + GAP)))
     const last = Math.min(this.totalPages - 1, Math.floor((y + h * 1.75 - PAD_TOP) / (pageH + GAP)))
+    // A page leaving the screen can show the next page of its chapter, with nothing to load (in a
+    // long chapter, loading is what you'd feel).
+    const spare: Mounted[] = []
     for (const [g, m] of this.mounted) {
       if (g < first - 1 || g > last + 1) {
-        m.el.remove()
         this.mounted.delete(g)
+        spare.push(m)
       }
     }
-    for (let g = first; g <= last; g++) if (!this.mounted.has(g)) void this.mount(g)
+    const wanted: number[] = []
+    for (let g = first; g <= last; g++) if (!this.mounted.has(g)) wanted.push(g)
+    // What's on screen first.
+    const mid = (y + h / 2 - PAD_TOP) / (pageH + GAP)
+    wanted.sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid))
+    for (const g of wanted) this.place(g, spare)
+    for (const m of spare) this.drop(m)
+  }
+
+  private place(g: number, spare: Mounted[]) {
+    const { k, p } = this.where(g)
+    const i = spare.findIndex((m) => m.s === this.sections[k].index)
+    if (i < 0) return void this.mount(g, k, p)
+    const [m] = spare.splice(i, 1)
+    m.doc?.getSelection()?.removeAllRanges()
+    m.p = p
+    m.el.style.top = `${this.pageTop(g)}px`
+    this.mounted.set(g, m)
+    if (m.doc) this.showColumn(m.doc, p)
   }
 
   /** After a chapter's page count changed: pages already up move to their new place. */
@@ -451,7 +686,7 @@ export class EpubScroller extends EventTarget {
     for (const m of this.mounted.values()) {
       const k = this.pos.get(m.s)!
       if (m.p >= this.sections[k].pages) {
-        m.el.remove()
+        this.drop(m)
         continue
       }
       const g = this.starts[k] + m.p
@@ -462,12 +697,11 @@ export class EpubScroller extends EventTarget {
     this.render()
   }
 
-  private async mount(g: number) {
-    const { k, p } = this.where(g)
+  private async mount(g: number, k: number, p: number) {
     const s = this.sections[k]
     const { pageW, pageH, padX, padY, textW, textH, left } = this.geo
     const el = document.createElement('div')
-    el.style.cssText = `position:absolute;left:${left}px;top:${this.pageTop(g)}px;width:${pageW}px;height:${pageH}px;background:${this.look.page};border-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.08),0 6px 22px rgba(0,0,0,.07)`
+    el.style.cssText = `position:absolute;left:${left}px;top:${this.pageTop(g)}px;width:${pageW}px;height:${pageH}px;overflow:hidden;background:${this.look.page};border-radius:2px;box-shadow:0 1px 2px rgba(0,0,0,.08),0 6px 22px rgba(0,0,0,.07)`
     const frame = document.createElement('iframe')
     frame.setAttribute('sandbox', 'allow-same-origin')
     frame.setAttribute('scrolling', 'no')
@@ -477,24 +711,35 @@ export class EpubScroller extends EventTarget {
     const m: Mounted = { el, frame, s: s.index, p }
     this.mounted.set(g, m)
     this.content.append(el)
-    const url = await this.urlOf(s)
-    if (!url || this.mounted.get(g) !== m) return
+    // You got here before the background count did: this chapter's next.
+    if (!s.measured) {
+      this.queue.unshift(k)
+      void this.runQueue()
+    }
+    const url = await this.urlOf(s.index)
+    if (!url || m.gone) return
     const doc = await this.loadFrame(frame, url)
-    if (!doc || this.mounted.get(g) !== m) return
+    if (!doc || m.gone) return
     this.styleDoc(doc)
-    this.wire(doc, s.index)
+    if (this.fixed) this.fitFixed(m, doc)
+    this.wire(doc, s.index, m)
     this.showColumn(doc, m.p)
     m.doc = doc
     this.paint(doc, s.index)
     frame.style.opacity = '1'
     // Fonts arriving late can shift the columns: show the right one again.
-    void doc.fonts?.ready.then(() => this.mounted.get(g) === m && this.showColumn(doc, m.p))
+    void doc.fonts?.ready.then(() => !m.gone && this.showColumn(doc, m.p))
     this.dispatchEvent(new CustomEvent('load', { detail: { doc, index: s.index } }))
-    if (!this.lastLocation) this.relocate()
+    // Your exact spot can be read once the page at the top of the screen is up.
+    if (!this.lastLocation?.cfi) this.relocate()
   }
 
-  /** Links and highlights in a book page. */
-  private wire(doc: Document, index: number) {
+  /** Links, highlights and keeping to its column, in a book page. */
+  private wire(doc: Document, index: number, m: Mounted) {
+    // Dragging a selection past the edge (or tabbing to a link) would slide the next column into this page.
+    doc.addEventListener('scroll', () => {
+      if (!m.gone) this.showColumn(doc, m.p)
+    })
     doc.addEventListener('click', (e) => {
       const a = (e.target as Element | null)?.closest?.('a[href]')
       if (a) {
@@ -505,15 +750,43 @@ export class EpubScroller extends EventTarget {
           return
         }
         const sec = this.book.sections[index] as unknown as { resolveHref?: (h: string) => string }
-        void this.goTo(sec.resolveHref?.(href) ?? href, true)
+        const target = sec.resolveHref?.(href) ?? href
+        void this.link(target, { a, doc, index }).then((r) => {
+          if (r?.note) this.dispatchEvent(new CustomEvent('note', { detail: r.note }))
+          else if (r?.inFlow) this.dispatchEvent(new CustomEvent('link', { detail: { target } }))
+        })
         return
       }
       // A highlight under the tap opens its card.
       const at = doc.caretRangeFromPoint?.(e.clientX, e.clientY)
       if (!at) return
-      const hit = (this.marks.get(doc) ?? []).find((m) => m.range.isPointInRange(at.startContainer, at.startOffset))
+      const hit = (this.marks.get(doc) ?? []).find((x) => x.range.isPointInRange(at.startContainer, at.startOffset))
       if (hit) this.dispatchEvent(new CustomEvent('show-annotation', { detail: { value: hit.cfi, range: hit.range, index } }))
     })
+  }
+
+  /**
+   * What a link or a contents entry leads to: a note to show in a card, or a place in the
+   * scroll. A section outside the reading order (notes, often) can only be shown in a card.
+   */
+  async link(href: string, from?: { a: Element; doc: Document; index: number }): Promise<{ note?: NoteCard; inFlow: boolean } | null> {
+    const r = (this.book as unknown as { resolveHref: (h: string) => { index: number; anchor: Anchor } | null }).resolveHref(href)
+    if (!r || r.index < 0) return null
+    const inFlow = this.pos.has(r.index)
+    if (inFlow && !from) return { inFlow }
+    const doc = from && from.index === r.index ? from.doc : await this.parsed(r.index)
+    if (!doc) return { inFlow }
+    const a = r.anchor(doc)
+    const el = a && typeof a === 'object' && !('startContainer' in a) ? a : null
+    const said = !!from && saysNoteRef(from.a)
+    const looks = !!from && looksLikeNoteRef(from.a)
+    if (inFlow && !said && !looks && !isNoteTarget(el)) return { inFlow }
+    const text = noteText(el ? noteBox(el) : (doc.body ?? doc.documentElement))
+    // A raised number that leads to a whole section isn't a note: go there.
+    if (!text || (inFlow && !said && !isNoteTarget(el) && text.length > NOTE_MAX)) return { inFlow }
+    // A note hidden in its page (an aside) or outside the reading order has nowhere to go to.
+    const hidden = !!el?.closest('aside') && isNoteTarget(el)
+    return { inFlow, note: { text, target: inFlow && !hidden ? href : null } }
   }
 
   // ── Highlights and search marks (the CSS Custom Highlight API: the book's text isn't touched) ──
@@ -529,7 +802,7 @@ export class EpubScroller extends EventTarget {
     return Promise.resolve(undefined)
   }
 
-  private repaint(cfi?: string) {
+  private repaint(cfi?: string | null) {
     let index: number | undefined
     try {
       if (cfi) index = this.resolveCFI(cfi).index
@@ -562,7 +835,7 @@ export class EpubScroller extends EventTarget {
   }
 
   private paint(doc: Document, index: number) {
-    const win = doc.defaultView as (Window & { CSS: { highlights?: Map<string, unknown> }; Highlight?: new (...r: Range[]) => unknown }) | null
+    const win = doc.defaultView as (Window & { CSS: { highlights?: Map<string, unknown> }; Highlight?: new (...r: Range[]) => { priority: number } }) | null
     const reg = win?.CSS?.highlights
     const H = win?.Highlight
     if (!reg || !H) return
@@ -573,39 +846,91 @@ export class EpubScroller extends EventTarget {
       if (rs.length) reg.set(`irb-${c}`, new H(...rs))
       else reg.delete(`irb-${c}`)
     }
-    const hits = this.rangesIn(doc, index, this.searchCfis).map((m) => m.range)
+    const hits = this.rangesIn(doc, index, (this.searchHits.get(index) ?? []).slice(0, 3000)).map((m) => m.range)
     if (hits.length) reg.set('irb-search', new H(...hits))
     else reg.delete('irb-search')
+    const cur = this.searchCurrent ? this.rangesIn(doc, index, [this.searchCurrent]).map((m) => m.range) : []
+    if (cur.length) {
+      const h = new H(...cur)
+      h.priority = 1
+      reg.set('irb-search-current', h)
+    } else reg.delete('irb-search-current')
   }
 
-  async *search(opts: { query: string }): AsyncGenerator<{ label?: string; subitems?: { cfi: string; excerpt: { pre: string; match: string; post: string } }[]; progress?: number } | 'done'> {
+  async *search(opts: { query: string }): AsyncGenerator<{ label?: string; subitems?: SearchHit[]; progress?: number } | 'done'> {
     this.clearSearch()
+    const id = this.searchId
     const [{ searchMatcher }, { textWalker }] = await Promise.all([import('foliate-js/search.js'), import('foliate-js/text-walker.js')])
-    const lang = typeof this.book.metadata?.language === 'string' ? this.book.metadata.language : 'en'
-    const matcher = (searchMatcher as (w: unknown, o: unknown) => (doc: Document, q: string) => Iterable<{ range: Range; excerpt: { pre: string; match: string; post: string } }>)(textWalker, { defaultLocale: lang })
+    const lang = [this.book.metadata?.language].flat()[0]
+    const matcher = (searchMatcher as (w: unknown, o: unknown) => (doc: Document, q: string) => Iterable<{ range: Range; excerpt: { pre: string; match: string; post: string } }>)(textWalker, { defaultLocale: typeof lang === 'string' ? lang : 'en' })
+    const total = Math.max(1, Math.ceil(this.totalSize / CHARS_PER_LOC))
     for (const [k, s] of this.sections.entries()) {
-      const sec = this.book.sections[s.index] as unknown as { createDocument?: () => Promise<Document> }
-      if (!sec.createDocument) continue
-      const doc = await sec.createDocument()
-      const subitems = Array.from(matcher(doc, opts.query), ({ range, excerpt }) => ({ cfi: this.getCFI(s.index, range), excerpt }))
+      // What's marked comes from what's shown, so a hit's CFI points at the same words in the page.
+      const doc = await this.parsed(s.index)
+      if (id !== this.searchId) return
+      const subitems: SearchHit[] = []
+      if (doc) {
+        // How far through the section's text each hit is: its location, near enough.
+        const walker = doc.createTreeWalker(doc.body ?? doc.documentElement, NodeFilter.SHOW_TEXT)
+        const before = new Map<Node, number>()
+        let chars = 0
+        for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+          before.set(n, chars)
+          chars += n.nodeValue?.length ?? 0
+        }
+        for (const { range, excerpt } of matcher(doc, opts.query)) {
+          const at = (before.get(range.startContainer) ?? 0) + range.startOffset
+          const page = Math.min(total - 1, Math.floor((s.before + (at / Math.max(1, chars)) * s.size) / CHARS_PER_LOC))
+          subitems.push({ cfi: this.getCFI(s.index, range), excerpt, page })
+        }
+      }
       yield { progress: (k + 1) / this.sections.length }
+      if (id !== this.searchId) return
       if (subitems.length) {
-        this.searchCfis.push(...subitems.map((x) => x.cfi))
+        this.searchHits.set(s.index, subitems.map((x) => x.cfi))
         this.repaintSection(s.index)
-        yield { label: this.tocLabel(s.index), subitems }
+        yield { label: this.chapterAt(subitems[0].page), subitems }
       }
     }
     yield 'done'
   }
 
   clearSearch() {
-    if (!this.searchCfis.length) return
-    this.searchCfis = []
+    this.searchId++
+    if (!this.searchHits.size && !this.searchCurrent) return
+    this.searchHits.clear()
+    this.searchCurrent = null
     this.repaint()
+  }
+
+  /** The search hit you're on stands out from the others. */
+  setSearchCurrent(cfi: string | null) {
+    const was = this.searchCurrent
+    this.searchCurrent = cfi
+    if (was && was !== cfi) this.repaint(was)
+    this.repaint(cfi)
   }
 
   private repaintSection(index: number) {
     for (const m of this.mounted.values()) if (m.doc && m.s === index) this.paint(m.doc, m.s)
+  }
+
+  /** Is this spot comfortably on screen right now, clear of the bars? */
+  isOnScreen(cfi: string) {
+    try {
+      const r = this.resolveCFI(cfi)
+      const top = this.el.getBoundingClientRect().top
+      for (const m of this.mounted.values()) {
+        if (m.s !== r.index || !m.doc) continue
+        const rect = rectOf(r.anchor(m.doc))
+        if (rect.left < 0 || rect.left >= this.geo.textW) continue
+        const y = m.frame.getBoundingClientRect().top + rect.top - top
+        return y > 80 && y < this.el.clientHeight - 140
+      }
+    } catch {
+      /* not in this copy of the book */
+    }
+    return false
   }
 
   // ── Positions ─────────────────────────────────────────────────────────
@@ -619,12 +944,42 @@ export class EpubScroller extends EventTarget {
     return (this.book as unknown as { resolveCFI: (c: string) => { index: number; anchor: (doc: Document) => Range | Element } }).resolveCFI(cfi)
   }
 
-  private tocLabel(index: number) {
-    for (let i = index; i >= 0; i--) {
-      const t = this.tocBySection.get(i)
-      if (t) return t.label
+  /** The contents entry a spot (`pos` pages into the chapter at `k`) comes under. */
+  private tocAt(k: number, pos: number): TocEntry | null {
+    for (let i = k; i >= 0; i--) {
+      const list = this.tocBySection.get(this.sections[i].index)
+      if (!list?.length) continue
+      if (i < k) return list[list.length - 1]
+      // Partway-through entries aren't placed until the chapter's laid out; until then, it's the first.
+      if (list.every((t) => t.pos == null)) return list[0]
+      let best: TocEntry | null = null
+      for (const t of list) if (t.pos != null && t.pos <= pos + 0.06) best = t
+      if (best) return best
     }
-    return ''
+    return null
+  }
+
+  private charsAt(chars: number) {
+    let k = this.sections.findIndex((s) => chars < s.before + s.size)
+    if (k < 0) k = this.sections.length - 1
+    const s = this.sections[k]
+    return { k, s, within: Math.max(0, Math.min(0.9999, (chars - s.before) / s.size)) * s.pages }
+  }
+
+  /** The chapter a location is in. */
+  chapterAt(page: number) {
+    const { k, within } = this.charsAt(page * CHARS_PER_LOC)
+    return this.tocAt(k, within)?.label
+  }
+
+  /** The location (the book's "page", for progress) a range in a book page is at. */
+  locationOf(doc: Document, index: number, range: Range) {
+    const s = this.sections[this.pos.get(index) ?? 0]
+    const se = doc.scrollingElement ?? doc.documentElement
+    const r = rectOf(range)
+    const { p, y } = this.columnOf(doc, new DOMRect(r.left + se.scrollLeft, r.top + se.scrollTop, r.width, r.height))
+    const chars = s.before + ((p + y / this.geo.textH) / s.pages) * s.size
+    return Math.min(Math.max(1, Math.ceil(this.totalSize / CHARS_PER_LOC)) - 1, Math.floor(chars / CHARS_PER_LOC))
   }
 
   /** Where you are, as the PDF reader reports it: from the top of the screen. */
@@ -648,7 +1003,7 @@ export class EpubScroller extends EventTarget {
     const m = this.mounted.get(top.g)
     if (m?.doc) {
       const yy = Math.max(0, Math.min(this.geo.textH - 2, y + 8 - this.pageTop(top.g) - this.geo.padY))
-      const r = m.doc.caretRangeFromPoint?.(2, yy)
+      const r = this.fixed ? null : m.doc.caretRangeFromPoint?.(this.rtl(m.doc) ? this.geo.textW - 2 : 2, yy)
       try {
         cfi = r ? this.getCFI(s.index, r) : this.getCFI(s.index)
       } catch {
@@ -656,84 +1011,90 @@ export class EpubScroller extends EventTarget {
       }
     }
     const total = Math.max(1, Math.ceil(this.totalSize / CHARS_PER_LOC))
-    const leftInSection = (1 - (top.p + top.within) / s.pages) * s.size
-    const t = this.tocBySection.get(s.index) ?? null
-    const label = this.tocLabel(s.index)
+    const here = top.p + top.within
+    const entry = this.tocAt(top.k, here)
+    // To the end of this chapter: the next contents entry in the file, or the file's end.
+    const nextPos = (this.tocBySection.get(s.index) ?? []).map((t) => t.pos).find((p): p is number => p != null && p > here + 0.06)
+    const leftInChapter = (((nextPos ?? s.pages) - here) / s.pages) * s.size
     this.lastLocation = {
       fraction: top.chars / this.totalSize,
       location: { current: Math.min(total - 1, Math.floor(top.chars / CHARS_PER_LOC)), next: Math.min(total, Math.floor(bottom.chars / CHARS_PER_LOC) + 1), total },
       section: { current: s.index, total: this.book.sections.length },
-      time: { section: leftInSection / 1600 },
-      tocItem: label ? { label, href: t?.href ?? '' } : null,
+      time: { section: leftInChapter / 1600 },
+      tocItem: entry ? { label: entry.label, href: entry.href } : null,
       cfi,
     }
     this.dispatchEvent(new CustomEvent('relocate', { detail: this.lastLocation }))
   }
 
   // ── Going places ──────────────────────────────────────────────────────
-  private async scrollToSpot(k: number, anchor?: Anchor) {
+  private async scrollToSpot(k: number, anchor: Anchor | undefined, at: Landing, jump: number) {
+    if (!this.sections[k]) return
+    const spot = anchor
+      ? await this.inMeasurer(
+          k,
+          (doc) => {
+            const a = doc && anchor(doc)
+            if (!doc || !a || typeof a !== 'object') return null
+            const rect = rectOf(a)
+            // Hidden by the book (or by us): there's no place on a page to take you to.
+            return rect.width || rect.height ? this.columnOf(doc, rect) : null
+          },
+          jump,
+        )
+      : null
+    if (jump !== this.jump || this.closed) return
     const s = this.sections[k]
-    if (!s) return
-    let p = 0
-    let yIn = 0
-    const doc = anchor ? await this.measure(k) : null
-    if (doc && anchor) {
-      const a = anchor(doc)
-      let rect: DOMRect | null = null
-      if (a && typeof a === 'object') {
-        if ('startContainer' in a) rect = a.getClientRects()[0] ?? a.getBoundingClientRect()
-        else rect = (a as Element).getBoundingClientRect()
-      }
-      if (rect) ({ p, y: yIn } = this.columnOf(doc, rect))
-      p = Math.min(p, s.pages - 1)
-    }
-    const top = this.pageTop(this.starts[k] + p) + (yIn ? Math.max(0, this.geo.padY + yIn - 24) : 0)
-    this.el.scrollTop = top
+    const p = Math.min(spot?.p ?? 0, s.pages - 1)
+    const offset = at === 'top' ? 8 : at === 'bar' ? 84 : Math.round(this.el.clientHeight * 0.35)
+    const d = this.geo.padY + (spot?.y ?? 0) - offset
+    this.el.scrollTop = this.pageTop(this.starts[k] + p) + (at === 'middle' ? d : Math.max(0, d))
     this.render()
     this.relocate()
   }
 
-  /** A CFI, an href in the book, or a section index. `user`: following a link. */
-  async goTo(target: string | number, user = false) {
-    void user
+  /** A CFI, an href in the book, or a section index. */
+  async goTo(target: string | number, at: Landing = 'bar') {
+    const jump = ++this.jump
     try {
       if (typeof target === 'number') {
         const k = this.pos.get(target)
-        if (k != null) await this.scrollToSpot(k)
+        if (k != null) await this.scrollToSpot(k, undefined, at, jump)
         return
       }
       if (this.cfi?.isCFI.test(target)) {
         const r = this.resolveCFI(target)
         const k = this.pos.get(r.index)
-        if (k != null) await this.scrollToSpot(k, r.anchor)
+        if (k != null) await this.scrollToSpot(k, r.anchor, at, jump)
         return
       }
       const r = (this.book as unknown as { resolveHref: (h: string) => { index: number; anchor: Anchor } | null }).resolveHref(target)
-      if (!r) return
-      const k = this.pos.get(r.index) ?? this.nearestLinear(r.index)
-      if (k != null) await this.scrollToSpot(k, r.anchor)
+      const k = r ? this.pos.get(r.index) : undefined
+      if (r && k != null) await this.scrollToSpot(k, r.anchor, at, jump)
     } catch (e) {
       console.error(e)
     }
   }
 
-  private nearestLinear(index: number) {
-    let best: number | undefined
-    for (const [i, k] of this.pos) if (i <= index) best = k
-    return best
-  }
-
-  async goToFraction(f: number) {
-    const chars = Math.max(0, Math.min(1, f)) * this.totalSize
-    let k = this.sections.findIndex((s) => chars < s.before + s.size)
-    if (k < 0) k = this.sections.length - 1
-    await this.measure(k)
-    const s = this.sections[k]
-    const within = Math.max(0, Math.min(0.9999, (chars - s.before) / s.size)) * s.pages
+  private async goToChars(chars: number) {
+    const jump = ++this.jump
+    const { k } = this.charsAt(chars)
+    await this.inMeasurer(k, () => {}, jump)
+    if (jump !== this.jump || this.closed) return
+    const { within } = this.charsAt(chars)
     const p = Math.floor(within)
     this.el.scrollTop = this.pageTop(this.starts[k] + p) + (within - p) * this.geo.pageH
     this.render()
     this.relocate()
+  }
+
+  goToFraction(f: number) {
+    return this.goToChars(Math.max(0, Math.min(1, f)) * this.totalSize)
+  }
+
+  /** A location (a bookmark, a saved spot, "page N"): exactly there, not just near it. */
+  goToLocation(page: number) {
+    return this.goToChars(Math.max(0, page) * CHARS_PER_LOC + 1)
   }
 
   /** The start of the text (past the cover and front matter, if the book says where that is). */
@@ -758,7 +1119,9 @@ export class EpubScroller extends EventTarget {
   }
 
   setCursorHidden(hidden: boolean) {
+    if (hidden === this.cursorHidden) return
     this.cursorHidden = hidden
+    this.el.style.cursor = hidden ? 'none' : ''
     for (const m of this.mounted.values()) m.doc?.documentElement.classList.toggle('irb-nocursor', hidden)
   }
 }

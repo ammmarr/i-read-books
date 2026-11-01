@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, BookA, Bookmark as BookmarkIcon, CornerUpLeft, FoldHorizontal, MonitorSmartphone, NotebookPen, UnfoldHorizontal, X as XIcon, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
+  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
@@ -17,7 +17,7 @@ import { useToast } from '../components/ui/Toast'
 import { BookCover } from '../components/BookCover'
 import { Sheet } from '../components/ui/Sheet'
 import { PageView, type PageHit } from './PageView'
-import { DocText, findInPage, normalizeQuery, type Match } from './textIndex'
+import { DocText, findInPage, normalizeQuery, snippet, type Match } from './textIndex'
 import { HighlightPopover, SelectionToolbar, HL_COLORS, type ShareTo } from './HighlightTools'
 import { SubstackNoteSheet } from '../components/ShareQuote'
 import { noteText, openXPost, xPostText } from '../lib/share'
@@ -28,6 +28,7 @@ import { extendSelectionOver, highlightsUnder, mergeRects, selectionBox, selecti
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { ReaderSettings } from './ReaderSettings'
 import { SearchPanel } from './SearchPanel'
+import { ElsewherePill, GoToPage, leaveReader, PlacePill, Scrubber } from './ReaderControls'
 import { useReadingSession } from './useReadingSession'
 import { useImporter } from '../components/Importer'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
@@ -105,7 +106,10 @@ export default function Reader() {
     if (!hasPdf) return setError('no-pdf')
     let alive = true
     let loaded: PDFDocumentProxy | null = null
+    let loadedEpub: FoliateBook | null = null
     setError(null)
+    setDoc(null)
+    setEbook(null)
     ;(async () => {
       try {
         const b = await db.books.get(id)
@@ -119,7 +123,10 @@ export default function Reader() {
         }
         if (b && isEpubBook(b)) {
           const eb = await openEpub(blob, b.fileName)
-          if (alive) setEbook(eb)
+          if (alive) {
+            loadedEpub = eb
+            setEbook(eb)
+          } else eb.destroy?.()
           return
         }
         loaded = await openPdfBlob(blob)
@@ -136,15 +143,18 @@ export default function Reader() {
             ? 'missing'
             : m?.startsWith('download') || m === 'Failed to fetch'
               ? 'offline'
-              : (e as Error)?.name === 'PasswordException'
-                ? 'password'
-                : 'broken',
+              : m === 'drm'
+                ? 'drm'
+                : (e as Error)?.name === 'PasswordException'
+                  ? 'password'
+                  : 'broken',
         )
       }
     })()
     return () => {
       alive = false
       if (loaded) closePdf(loaded)
+      loadedEpub?.destroy?.()
     }
   }, [id, hasPdf, attempt])
 
@@ -171,6 +181,8 @@ export default function Reader() {
     )
   if (error === 'offline')
     return <ReaderMessage title="Couldn’t download this book" body="Check your connection and try again." onBack={() => navigate('/')} action={{ label: 'Try again', onClick: () => setAttempt((a) => a + 1) }} book={book} />
+  if (error === 'drm')
+    return <ReaderMessage title="This EPUB is copy-protected" body="It’s locked to the store’s own app (DRM), so I read can’t show its pages. A DRM-free copy of the book will open here." onBack={() => navigate('/')} book={book} />
   if (error === 'password')
     return <ReaderMessage title="This PDF is password-protected" body="I read can’t open locked PDFs yet. Remove the password (e.g. print it to a new PDF) and add it again." onBack={() => navigate('/')} book={book} detail={detail} />
   if (error)
@@ -1741,7 +1753,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
             className="safe-top absolute inset-x-0 top-0 z-40 border-b border-hairline bg-canvas/88 backdrop-blur-md"
           >
             <div className="flex h-14 items-center gap-1 px-2 sm:px-3">
-              <IconButton label="Back to library" tipBelow onClick={() => navigate(-1)}>
+              <IconButton label="Back to library" tipBelow onClick={() => leaveReader(navigate)}>
                 <ArrowLeft className="size-[18px]" />
               </IconButton>
               <IconButton label="Contents & notes (T)" tipBelow onClick={() => setSidebar((s) => ({ ...s, open: true }))}>
@@ -1853,7 +1865,10 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
             total={doc.numPages}
             onGo={(n) => goToMatch(n)}
             onClose={closeSearch}
-            text={text}
+            snippetOf={(m) => {
+              const idx = text.peekIndex(m.page)
+              return idx ? snippet(idx, m.start, m.end) : null
+            }}
             chapterFor={chapterFor}
           />
         )}
@@ -1917,44 +1932,20 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
         )}
       </AnimatePresence>
 
-      {/* Newer position from another device */}
-      <AnimatePresence>
-        {elsewhere && !place && (
-          <motion.div
-            key="elsewhere"
-            initial={{ opacity: 0, y: 16, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.97 }}
-            transition={{ type: 'spring', stiffness: 520, damping: 34 }}
-            className={`absolute left-1/2 z-40 flex -translate-x-1/2 items-center rounded-full border border-hairline bg-canvas-elevated pl-1 shadow-floating ${
-              chrome ? 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+80px)]' : 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+20px)]'
-            } transition-[bottom] duration-300`}
-          >
-            <button
-              onClick={() => {
-                const e = elsewhere
-                setElsewhere(null)
-                dropOther()
-                scrollToPage(e.page, { frac: e.offset })
-              }}
-              className="flex h-10 items-center gap-2 rounded-full px-3 text-label-sm text-ink hover:bg-hairline-soft"
-            >
-              <MonitorSmartphone className="size-4 text-link" />
-              Continue from page {elsewhere.page + 1}
-              <span className="font-normal text-mute">· read on another device</span>
-            </button>
-            <button
-              onClick={() => {
-                setElsewhere(null)
-                dropOther()
-              }}
-              aria-label="Stay here"
-              className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
-              <XIcon className="size-3.5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <ElsewherePill
+        page={elsewhere && !place ? elsewhere.page : null}
+        chrome={chrome}
+        onGo={() => {
+          const e = elsewhere
+          setElsewhere(null)
+          dropOther()
+          if (e) scrollToPage(e.page, { frac: e.offset })
+        }}
+        onStay={() => {
+          setElsewhere(null)
+          dropOther()
+        }}
+      />
 
       {/* Holding Shift: the word under the mouse, in blue */}
       {hoverWord?.rects.map((r, i) => (
@@ -1966,30 +1957,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
 
       <StillReading asking={asking} away={away} stillHere={stillHere} countAway={countAway} dismissAway={dismissAway} />
 
-      {/* Back to where you left off, after a jump */}
-      <AnimatePresence>
-        {place && (
-          <motion.div
-            key="place"
-            initial={{ opacity: 0, y: 16, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 10, scale: 0.97 }}
-            transition={{ type: 'spring', stiffness: 520, damping: 34 }}
-            className={`absolute left-1/2 z-40 flex -translate-x-1/2 items-center rounded-full border border-hairline bg-canvas-elevated pl-1 shadow-floating ${
-              chrome ? 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+80px)]' : 'bottom-[calc(var(--safe-area-inset-bottom,env(safe-area-inset-bottom))+20px)]'
-            } transition-[bottom] duration-300`}
-          >
-            <button onClick={goBack} className="flex h-10 items-center gap-2 rounded-full px-3 text-label-sm text-ink hover:bg-hairline-soft">
-              <CornerUpLeft className="size-4 text-link" />
-              Back to page {place.page + 1}
-              <span className="font-normal text-mute">· where you left off</span>
-            </button>
-            <button onClick={stayHere} aria-label="Stay here" title="Stay here" className="mr-1 grid size-8 place-items-center rounded-full text-faint hover:bg-hairline-soft hover:text-ink">
-              <XIcon className="size-3.5" />
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <PlacePill page={place?.page ?? null} chrome={chrome} onBack={goBack} onStay={stayHere} />
 
       {/* Chapter finished → recap (gone by itself if it gets written on another device) */}
       <AnimatePresence>
@@ -2109,109 +2077,6 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
       />
       <Shortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
-  )
-}
-
-function Scrubber({
-  page, count, chapterFor, bookmarks, onScrub,
-}: {
-  page: number
-  count: number
-  chapterFor: (p: number) => string | undefined
-  bookmarks: Set<number>
-  onScrub: (p: number) => void
-}) {
-  const [drag, setDrag] = useState<number | null>(null)
-  const value = drag ?? page
-  const pct = count > 1 ? (value / (count - 1)) * 100 : 100
-  const raf = useRef(0)
-  return (
-    <div className="relative flex min-w-0 flex-1 items-center">
-      <AnimatePresence>
-        {drag != null && (
-          <motion.div
-            initial={{ opacity: 0, y: 6, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 4, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 600, damping: 32 }}
-            className="pointer-events-none absolute bottom-[calc(100%+10px)] z-10 max-w-[240px] -translate-x-1/2 rounded-sm bg-ink px-3 py-1.5 text-center text-canvas shadow-floating"
-            style={{ left: `clamp(60px, ${pct}%, calc(100% - 60px))` }}
-          >
-            <div className="text-label-sm tabular">Page {value + 1}</div>
-            {chapterFor(value) && <div className="truncate text-[11px] opacity-70">{chapterFor(value)}</div>}
-          </motion.div>
-        )}
-      </AnimatePresence>
-      {/* bookmark ticks along the track */}
-      <div className="pointer-events-none absolute inset-x-[9px] top-1/2 h-0">
-        {[...bookmarks].map((b) => (
-          <span key={b} className="absolute -top-[7px] h-[5px] w-[2px] -translate-x-1/2 rounded-full bg-link" style={{ left: `${count > 1 ? (b / (count - 1)) * 100 : 0}%` }} />
-        ))}
-      </div>
-      <input
-        type="range"
-        aria-label="Page"
-        min={0}
-        max={Math.max(0, count - 1)}
-        value={value}
-        className="scrubber"
-        style={{ '--fill': `${pct}%` } as React.CSSProperties}
-        onPointerDown={() => setDrag(page)}
-        onChange={(e) => {
-          const v = Number(e.target.value)
-          setDrag(v)
-          cancelAnimationFrame(raf.current)
-          raf.current = requestAnimationFrame(() => onScrub(v))
-        }}
-        onPointerUp={() => setDrag(null)}
-        onBlur={() => setDrag(null)}
-        onKeyUp={() => setDrag(null)}
-      />
-    </div>
-  )
-}
-
-function GoToPage({ page, count, onGo, progress }: { page: number; count: number; onGo: (p: number) => void; progress: number }) {
-  const [editing, setEditing] = useState(false)
-  const [v, setV] = useState('')
-  if (editing)
-    return (
-      <form
-        onSubmit={(e) => {
-          e.preventDefault()
-          const n = parseInt(v, 10)
-          if (!Number.isNaN(n)) onGo(Math.max(1, Math.min(count, n)) - 1)
-          setEditing(false)
-        }}
-        className="flex items-center gap-1 text-body-sm text-mute"
-      >
-        <input
-          autoFocus
-          inputMode="numeric"
-          value={v}
-          onChange={(e) => setV(e.target.value.replace(/\D/g, ''))}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => e.key === 'Escape' && setEditing(false)}
-          className="h-8 w-14 rounded-sm border border-link bg-canvas-elevated text-center text-label-sm tabular text-ink outline-none ring-3 ring-link/15"
-        />
-        <span className="tabular">/ {count}</span>
-      </form>
-    )
-  return (
-    <button
-      onClick={() => {
-        setV(String(page + 1))
-        setEditing(true)
-      }}
-      title="Go to page"
-      className="flex h-8 shrink-0 flex-col items-end justify-center rounded-sm px-1.5 leading-tight transition-colors hover:bg-hairline-soft"
-    >
-      <span className="text-label-sm tabular text-ink">
-        {page + 1}
-        <span className="text-mute"> / {count}</span>
-      </span>
-      <span className="text-[11px] tabular text-faint" title="Pages you’ve actually read — skimming doesn’t count">{Math.round(progress * 100)}% read</span>
-    </button>
   )
 }
 

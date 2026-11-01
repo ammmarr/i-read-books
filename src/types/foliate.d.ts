@@ -18,6 +18,9 @@ declare module 'foliate-js/view.js' {
     rendition?: { layout?: string }
     transformTarget?: EventTarget
     getCover?: () => Promise<Blob | null> | Blob | null
+    loadText?: (name: string) => Promise<string | null> | null
+    /** Lets go of the book's loaded files. */
+    destroy?: () => void
   }
   export interface FoliateLocation {
     fraction: number

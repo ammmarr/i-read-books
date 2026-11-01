@@ -1,23 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
 import { motion } from 'motion/react'
 import { ChevronDown, ChevronUp, Search, X } from 'lucide-react'
-import type { DocText, Match } from './textIndex'
-import { snippet } from './textIndex'
+import type { Match } from './textIndex'
 
-interface Props {
+interface Props<M extends Match> {
   query: string
   onQuery: (q: string) => void
-  matches: Match[]
+  matches: M[]
   current: number
   scanned: number
   total: number
   onGo: (n: number) => void
   onClose: () => void
-  text: DocText
+  /** The words around a result (when they're known yet). */
+  snippetOf: (m: M) => { before: string; match: string; after: string } | null
+  /** Under "No results", instead of the note about scanned PDFs. */
+  emptyHint?: string
   chapterFor: (page: number) => string | undefined
 }
 
-export function SearchPanel({ query, onQuery, matches, current, scanned, total, onGo, onClose, text, chapterFor }: Props) {
+export function SearchPanel<M extends Match>({ query, onQuery, matches, current, scanned, total, onGo, onClose, snippetOf, emptyHint, chapterFor }: Props<M>) {
   const input = useRef<HTMLInputElement>(null)
   const [showList, setShowList] = useState(true)
   const searching = !!query.trim() && scanned < total
@@ -89,12 +91,11 @@ export function SearchPanel({ query, onQuery, matches, current, scanned, total, 
           {!matches.length && !searching && (
             <div className="px-4 py-8 text-center">
               <p className="text-label-sm text-ink">No results for “{query.trim()}”</p>
-              <p className="mt-1 text-body-sm text-mute">Scanned PDFs without a text layer can't be searched.</p>
+              <p className="mt-1 text-body-sm text-mute">{emptyHint ?? "Scanned PDFs without a text layer can't be searched."}</p>
             </div>
           )}
           {matches.slice(0, 500).map((m) => {
-            const idx = text.peekIndex(m.page)
-            const s = idx ? snippet(idx, m.start, m.end) : null
+            const s = snippetOf(m)
             const chapter = chapterFor(m.page)
             return (
               <button

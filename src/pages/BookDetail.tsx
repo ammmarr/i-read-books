@@ -22,6 +22,7 @@ import { addDays, bookStats, dailyTotals, dayKey, startOfDay, summarize } from '
 import { formatBytes, formatDate, formatDuration, formatDurationLong, relativeTime, pluralize } from '../lib/format'
 import { HL_COLORS, swatchOf } from '../reader/HighlightTools'
 import { RecapSection } from '../components/recap/RecapSection'
+import { isEpubBook } from '../lib/epub'
 
 export default function BookDetail() {
   const { id } = useParams()
@@ -192,7 +193,7 @@ export default function BookDetail() {
         </section>
       )}
 
-      {book.pageCount > 0 && <RecapSection book={book} onJumpToHighlight={openAt} />}
+      {book.pageCount > 0 && !isEpubBook(book) && <RecapSection book={book} onJumpToHighlight={openAt} />}
 
       <section className="mt-10">
         <div className="mb-4 flex flex-wrap items-center gap-2">
