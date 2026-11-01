@@ -1556,7 +1556,8 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     const onKey = (e: KeyboardEvent) => {
       if (writerOpen.current) return
       const t = e.target
-      const typing = t instanceof Element && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"] button')
+      // Typing, or anywhere in an open panel (a Note, the sidebar…): the keys are yours, not shortcuts.
+      const typing = t instanceof Element && t.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')
       const mod = e.ctrlKey || e.metaKey
       // Ctrl+F: fit the page to the screen width (again to undo).
       // Search lives on "/" and Ctrl+Shift+F.

@@ -22,23 +22,32 @@ export function Sheet({ open, onClose, title, description, side = 'center', widt
   const mobile = useIsMobile()
   const drag = useDragControls()
   const panelRef = useRef<HTMLDivElement>(null)
+  // The latest onClose, without re-running the effect below: callers pass a new one every render, and
+  // re-running it took the focus back to the panel — out of the box you were typing in (so your letters
+  // went to the page's shortcuts instead).
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
 
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation()
-        onClose()
+        closeRef.current()
       }
     }
     window.addEventListener('keydown', onKey, true)
     const prev = document.activeElement as HTMLElement | null
-    requestAnimationFrame(() => panelRef.current?.focus({ preventScroll: true }))
+    // Once, as it opens — and not over something inside it that already has the focus (autoFocus).
+    requestAnimationFrame(() => {
+      const panel = panelRef.current
+      if (panel && !panel.contains(document.activeElement)) panel.focus({ preventScroll: true })
+    })
     return () => {
       window.removeEventListener('keydown', onKey, true)
       prev?.focus?.({ preventScroll: true })
     }
-  }, [open, onClose])
+  }, [open])
 
   const place = mobile ? 'bottom' : side
   const variants = {

@@ -79,7 +79,9 @@ function loadSpot(id: string): { cfi: string; page: number } | null {
   }
 }
 
-const isTyping = (t: EventTarget | null) => t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+/** Typing, or anywhere in an open panel (a Note, search, the sidebar…): the keys are yours, not shortcuts. */
+const isTyping = (t: EventTarget | null) =>
+  t instanceof HTMLElement && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || !!t.closest('[role="dialog"]'))
 const NO_HIGHLIGHTS: Highlight[] = []
 const NO_BOOKMARKS: Bookmark[] = []
 
