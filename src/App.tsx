@@ -8,6 +8,7 @@ import Library from './pages/Library'
 import ReadingList from './pages/ReadingList'
 import Stats from './pages/Stats'
 import Words from './pages/Words'
+import Highlights from './pages/Highlights'
 import SettingsPage from './pages/Settings'
 import BookDetail from './pages/BookDetail'
 import Reader from './reader/Reader'
@@ -20,6 +21,7 @@ const routes: RouteObject[] = [
     children: [
       { path: '/', element: <Library /> },
       { path: '/list', element: <ReadingList /> },
+      { path: '/highlights', element: <Highlights /> },
       { path: '/words', element: <Words /> },
       { path: '/stats', element: <Stats /> },
       { path: '/settings', element: <SettingsPage /> },

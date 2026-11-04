@@ -153,6 +153,33 @@ function noteText(box: Element) {
   return parts.length ? parts.join(String.fromCharCode(10, 10)) : tidy(copy.textContent)
 }
 
+/** A chapter's words with their spacing evened out (as a highlight's text is), and where each character came from. */
+function flatten(doc: Document) {
+  const nodes: Text[] = []
+  const walker = doc.createTreeWalker(doc.body ?? doc.documentElement, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text)
+  const size = nodes.reduce((sum, n) => sum + n.data.length, 0)
+  const nodeAt = new Uint32Array(size)
+  const offsetAt = new Uint32Array(size)
+  const pieces: string[] = []
+  let len = 0
+  let afterSpace = true
+  nodes.forEach((n, i) => {
+    let piece = ''
+    for (let j = 0; j < n.data.length; j++) {
+      const space = /\s/.test(n.data[j])
+      if (space && afterSpace) continue
+      nodeAt[len] = i
+      offsetAt[len] = j
+      len++
+      piece += space ? ' ' : n.data[j]
+      afterSpace = space
+    }
+    pieces.push(piece)
+  })
+  return { doc, nodes, nodeAt, offsetAt, text: pieces.join('') }
+}
+
 const rectOf = (a: Range | Element) => ('startContainer' in a ? (a.getClientRects()[0] ?? a.getBoundingClientRect()) : a.getBoundingClientRect())
 
 type CFIModule = typeof import('foliate-js/epubcfi.js') & {
@@ -913,6 +940,43 @@ export class EpubScroller extends EventTarget {
 
   private repaintSection(index: number) {
     for (const m of this.mounted.values()) if (m.doc && m.s === index) this.paint(m.doc, m.s)
+  }
+
+  /**
+   * Finds highlights that have no exact place by their words: the copy nearest the page each was
+   * on, in its own chapter first. Calls `found` with the place of each one it finds.
+   */
+  async locate(items: { id: string; text: string; page: number }[], found: (id: string, cfi: string) => unknown) {
+    const flats = new Map<number, ReturnType<typeof flatten> | null>()
+    for (const item of items) {
+      const words = item.text.replace(/\s+/g, ' ').trim()
+      if (!words) continue
+      const chars = item.page * CHARS_PER_LOC
+      const { k } = this.charsAt(chars)
+      const order = this.sections.map((_, i) => i).sort((a, b) => Math.abs(a - k) - Math.abs(b - k))
+      for (const i of order) {
+        const s = this.sections[i]
+        if (!flats.has(s.index)) {
+          const doc = await this.parsed(s.index)
+          flats.set(s.index, doc && flatten(doc))
+        }
+        if (this.closed) return
+        const f = flats.get(s.index)
+        if (!f) continue
+        const aim = ((chars - s.before) / Math.max(1, s.size)) * f.text.length
+        let best = -1
+        for (let at = f.text.indexOf(words); at >= 0; at = f.text.indexOf(words, at + 1)) {
+          if (best < 0 || Math.abs(at - aim) < Math.abs(best - aim)) best = at
+        }
+        if (best < 0) continue
+        const last = best + words.length - 1
+        const range = f.doc.createRange()
+        range.setStart(f.nodes[f.nodeAt[best]], f.offsetAt[best])
+        range.setEnd(f.nodes[f.nodeAt[last]], f.offsetAt[last] + 1)
+        await found(item.id, this.getCFI(s.index, range))
+        break
+      }
+    }
   }
 
   /** Is this spot comfortably on screen right now, clear of the bars? */

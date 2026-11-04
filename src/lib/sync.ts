@@ -155,7 +155,11 @@ function fromRemote(table: SyncTable, r: Row, local?: Row): Row {
     case 'highlights':
       return {
         ...base, id: r.id, bookId: r.book_id, page: r.page, color: r.color, text: r.text ?? '', note: u(r.note as string | null),
-        rects: r.rects ?? [], cfi: u(r.cfi as string | null), createdAt: r.created_at ?? Date.now(),
+        rects: r.rects ?? [],
+        // Where a highlight sits in an EPUB never changes, so a copy without it (a cloud with no such
+        // column yet, a device that hasn't placed it) can't take it away: that's what draws its colour.
+        cfi: (r.cfi as string | null | undefined) ?? (local as unknown as Highlight | undefined)?.cfi,
+        createdAt: r.created_at ?? Date.now(),
       }
     case 'bookmarks':
       return { ...base, id: r.id, bookId: r.book_id, page: r.page, createdAt: r.created_at ?? Date.now() }

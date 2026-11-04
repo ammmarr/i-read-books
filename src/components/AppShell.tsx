@@ -6,6 +6,7 @@ import {
   BookOpen,
   ChartColumn,
   Flame,
+  Highlighter,
   ListOrdered,
   Moon,
   Plus,
@@ -26,6 +27,7 @@ import { Button, IconButton } from "./ui/Button";
 const NAV = [
   { to: "/", label: "Library", icon: BookOpen },
   { to: "/list", label: "Reading list", short: "List", icon: ListOrdered },
+  { to: "/highlights", label: "Highlights", icon: Highlighter },
   { to: "/words", label: "Words", icon: BookA },
   { to: "/stats", label: "Insights", icon: ChartColumn },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -100,9 +102,10 @@ export function AppShell() {
 
   return (
     <div className="flex min-h-full flex-col">
-      <header className="safe-top sticky top-0 z-40 border-b border-hairline bg-canvas/85 backdrop-blur-md">
+      <header className="safe-top sticky top-0 z-40 overflow-x-clip border-b border-hairline bg-canvas/85 backdrop-blur-md">
         <div className="mx-auto flex h-14 max-w-[1200px] items-center gap-2 px-4 md:h-16 md:px-6 touch:max-w-none">
-          <nav className="hidden items-center gap-1 md:flex">
+          {/* If the header ever runs out of room (an Update button on a small tablet), the links scroll, not the page. */}
+          <nav className="hidden min-w-0 items-center gap-1 overflow-x-auto [scrollbar-width:none]! md:flex">
             {NAV.map((n) => {
               const active =
                 n.to === "/"
@@ -112,7 +115,7 @@ export function AppShell() {
                 <NavLink
                   key={n.to}
                   to={n.to}
-                  className={`relative rounded-full px-3 py-1.5 text-label-sm transition-colors ${active ? "text-ink" : "text-body hover:text-ink"}`}
+                  className={`relative shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-label-sm transition-colors ${active ? "text-ink" : "text-body hover:text-ink"}`}
                 >
                   {active && (
                     <motion.span
@@ -125,12 +128,13 @@ export function AppShell() {
                       }}
                     />
                   )}
-                  {n.label}
+                  <span className="lg:hidden">{n.short ?? n.label}</span>
+                  <span className="hidden lg:inline">{n.label}</span>
                 </NavLink>
               );
             })}
           </nav>
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <UpdateButton />
             <InstallButton />
             <StreakChip />
@@ -195,7 +199,7 @@ function MobileTabs({ section }: { section: string }) {
             <NavLink
               key={n.to}
               to={n.to}
-              className="relative flex h-16 flex-1 flex-col items-center justify-center gap-1"
+              className="relative flex h-16 min-w-0 flex-1 flex-col items-center justify-center gap-1"
             >
               {active && (
                 <motion.span
@@ -206,7 +210,7 @@ function MobileTabs({ section }: { section: string }) {
               )}
               <motion.span
                 whileTap={{ scale: 0.85 }}
-                className="relative grid h-8 w-14 place-items-center"
+                className="relative grid h-8 w-full max-w-14 place-items-center"
               >
                 <Icon
                   className={`size-5 transition-colors ${active ? "text-ink" : "text-mute"}`}

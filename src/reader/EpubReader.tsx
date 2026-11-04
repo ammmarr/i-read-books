@@ -788,6 +788,24 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
     for (const [cfi, color] of now) if (drawn.current.get(cfi) !== color) void v.addAnnotation({ value: cfi, color }).catch(() => {})
     drawn.current = now
   }, [marks, ready])
+  // Highlights with no exact place (an older sync wiped it; or they came from a device without it)
+  // find it again by their words, and get their colour back.
+  const placing = useRef(false)
+  const triedPlacing = useRef(new Set<string>())
+  useEffect(() => {
+    const v = viewRef.current
+    if (!v || !ready || placing.current) return
+    const lost = highlights.filter((h) => !h.cfi && !h.rects.length && h.text && !triedPlacing.current.has(h.id))
+    if (!lost.length) return
+    for (const h of lost) triedPlacing.current.add(h.id)
+    placing.current = true
+    void v
+      .locate(lost, (id, cfi) => db.highlights.update(id, { cfi }))
+      .catch((e) => console.warn('placing highlights failed', e))
+      .finally(() => {
+        placing.current = false
+      })
+  }, [highlights, ready])
   useEffect(() => {
     try {
       localStorage.setItem(TYPE_KEY, JSON.stringify(type))
@@ -910,7 +928,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
     else if (r?.inFlow) void jump(false, (v) => v.goTo(href))
   }
   const copyAllHighlights = async () => {
-    const sorted = [...marks].sort((a, b) => a.page - b.page || a.createdAt - b.createdAt)
+    const sorted = [...highlights].sort((a, b) => a.page - b.page || a.createdAt - b.createdAt)
     const md = [
       `# ${book.title}${book.author ? ` — ${book.author}` : ''}`,
       '',
@@ -1301,7 +1319,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         outline={NOTHING}
         chapterTitle={chapter}
         currentPage={here}
-        highlights={marks}
+        highlights={highlights}
         bookmarks={bookmarks}
         onJump={(p) => {
           setTocOpen(false)
@@ -1309,7 +1327,8 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         }}
         onJumpHighlight={(h) => {
           setTocOpen(false)
-          void jump(true, (v) => v.goTo(h.cfi!, 'middle'))
+          // (One that can't be placed in this copy of the book: its page, near enough.)
+          void jump(true, (v) => (h.cfi ? v.goTo(h.cfi, 'middle') : v.goToLocation(h.page)))
         }}
         onDeleteHighlight={(h) => void removeHighlights([h])}
         onToggleBookmark={() => void toggleBookmark()}
