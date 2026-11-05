@@ -459,12 +459,29 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     [pageAt, book.id],
   )
 
+  // Read before the new sizes reach the page: a shorter book would cut the scroll position short.
+  const scrollBefore = scroller.current?.scrollTop ?? 0
+  const placedBefore = restored.current
+  const laidOut = useRef(layout)
   useLayoutEffect(() => {
     const el = scroller.current
     const a = anchor.current
+    const was = laidOut.current
+    laidOut.current = layout
     if (content.current) {
       content.current.style.transform = ''
       content.current.style.transformOrigin = ''
+    }
+    if (el && !a && placedBefore && was.total !== layout.total) {
+      // The window changed (a tablet turned, a window resized, full screen) and the pages with it:
+      // you stay on the same page. The scroll position alone would now be pages away.
+      const y = scrollBefore + 16
+      let i = was.tops.length - 1
+      while (i > 0 && was.tops[i] > y) i--
+      scrollState.current.quietUntil = performance.now() + 300
+      posQuietUntil.current = performance.now() + 400
+      el.scrollTop = layout.tops[i] + ((y - was.tops[i]) / was.heights[i]) * layout.heights[i] - 16
+      return
     }
     if (!el || !a) return
     anchor.current = null

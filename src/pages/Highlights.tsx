@@ -1,5 +1,5 @@
 import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useNavigationType, useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Bookmark as BookmarkIcon, ChevronDown, Copy, ExternalLink, Highlighter, Pencil, Search, StickyNote, Trash2 } from 'lucide-react'
 import { db, type Book, type Bookmark, type Highlight, type HighlightColor, type WebAnnotation } from '../db/db'
@@ -110,11 +110,14 @@ function toMarkdown(list: Item[]) {
 const PAGE = 100
 const SPOT_KEY = 'irb-highlights-spot'
 
+/** This visit's place in the browser's history: Back returns to it, a new visit from the menu has its own. */
+const historyStep = () => (window.history.state as { idx?: number } | null)?.idx ?? 0
+
 /** Where you were in the list: back from the reader, you're there again. */
 function savedSpot(search: string): { y: number; limit: number } | null {
   try {
-    const s = JSON.parse(sessionStorage.getItem(SPOT_KEY) || 'null') as { search: string; y: number; limit: number } | null
-    return s && s.search === search ? s : null
+    const s = JSON.parse(sessionStorage.getItem(SPOT_KEY) || 'null') as { search: string; step: number; y: number; limit: number } | null
+    return s && s.search === search && s.step === historyStep() ? s : null
   } catch {
     return null
   }
@@ -128,7 +131,6 @@ export default function Highlights() {
   const books = useLiveQuery(() => db.books.toArray(), [])
   const navigate = useNavigate()
   const { toast } = useToast()
-  const navigation = useNavigationType()
 
   // The filters live in the address, so Back from a highlight brings them back too.
   const [params, setParams] = useSearchParams()
@@ -197,7 +199,7 @@ export default function Highlights() {
 
   // A long list comes a part at a time; changing a filter starts it again.
   const filters = `${source}|${kind}|${color}|${needle}|${sort}`
-  const [spot] = useState(() => (navigation === 'POP' ? savedSpot(window.location.hash.split('?')[1] ?? '') : null))
+  const [spot] = useState(() => savedSpot(window.location.hash.split('?')[1] ?? ''))
   const [more, setMore] = useState({ filters, limit: spot?.limit ?? PAGE })
   const limit = more.filters === filters ? more.limit : PAGE
   const visible = shown.slice(0, limit)
@@ -214,7 +216,7 @@ export default function Highlights() {
   const openInBook = (i: Item) => {
     if (!i.source.book || i.page == null) return
     try {
-      sessionStorage.setItem(SPOT_KEY, JSON.stringify({ search: window.location.hash.split('?')[1] ?? '', y: window.scrollY, limit }))
+      sessionStorage.setItem(SPOT_KEY, JSON.stringify({ search: window.location.hash.split('?')[1] ?? '', step: historyStep(), y: window.scrollY, limit }))
     } catch {
       /* ignore */
     }

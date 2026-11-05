@@ -213,6 +213,8 @@ export class EpubScroller extends EventTarget {
   private layoutGen = 0
   /** Bumped by each jump: only the latest one lands. */
   private jump = 0
+  /** The last jump that finished: when it isn't the latest, one is under way. */
+  private settled = 0
   private annotations = new Map<string, HighlightColor>()
   private searchId = 0
   private searchHits = new Map<number, string[]>()
@@ -275,6 +277,13 @@ export class EpubScroller extends EventTarget {
     this.layoutGeometry()
     this.estimate()
     this.applyHeights()
+    // The pages just made the screen scroll, and on a laptop the scrollbar takes up width. Settle that
+    // now: seen later, it would lay the book out again while the first jump is under way.
+    if (this.el.clientWidth !== this.width) {
+      this.layoutGeometry()
+      this.estimate()
+      this.applyHeights()
+    }
     this.ro.observe(this.el)
   }
 
@@ -410,7 +419,9 @@ export class EpubScroller extends EventTarget {
     this.mounted.clear()
     this.estimate()
     this.applyHeights()
-    const back = cfi ? this.goTo(cfi, 'top') : frac != null ? this.goToFraction(frac) : Promise.resolve()
+    // A jump under way still goes where you asked (it waits for the new count): you weren't staying here.
+    const jumping = this.settled !== this.jump
+    const back = jumping ? Promise.resolve() : cfi ? this.goTo(cfi, 'top') : frac != null ? this.goToFraction(frac) : Promise.resolve()
     void back.finally(() => this.render())
     this.measureAll()
   }
@@ -613,6 +624,18 @@ export class EpubScroller extends EventTarget {
     const turn = this.measurerTurn.then(async () => use(jump != null && jump !== this.jump ? null : await this.measure(k)))
     this.measurerTurn = turn.catch(() => {})
     return turn
+  }
+
+  /**
+   * For a jump: where a spot falls depends on how many pages its chapter really has, and a new layout
+   * meanwhile throws the count away. Landing on a guessed length would put you pages off, so count again.
+   */
+  private async whenMeasured<T>(k: number, use: (doc: Document | null) => T, jump: number) {
+    let out = await this.inMeasurer(k, use, jump)
+    for (let tries = 0; tries < 3 && jump === this.jump && !this.closed && !this.sections[k]?.measured; tries++) {
+      out = await this.inMeasurer(k, use, jump)
+    }
+    return out
   }
 
   /** Where this chapter's contents entries are (one file can hold many chapters). */
@@ -1095,7 +1118,7 @@ export class EpubScroller extends EventTarget {
   private async scrollToSpot(k: number, anchor: Anchor | undefined, at: Landing, jump: number) {
     if (!this.sections[k]) return
     const spot = anchor
-      ? await this.inMeasurer(
+      ? await this.whenMeasured(
           k,
           (doc) => {
             const a = doc && anchor(doc)
@@ -1137,19 +1160,25 @@ export class EpubScroller extends EventTarget {
       if (r && k != null) await this.scrollToSpot(k, r.anchor, at, jump)
     } catch (e) {
       console.error(e)
+    } finally {
+      if (jump === this.jump) this.settled = jump
     }
   }
 
   private async goToChars(chars: number) {
     const jump = ++this.jump
-    const { k } = this.charsAt(chars)
-    await this.inMeasurer(k, () => {}, jump)
-    if (jump !== this.jump || this.closed) return
-    const { within } = this.charsAt(chars)
-    const p = Math.floor(within)
-    this.el.scrollTop = this.pageTop(this.starts[k] + p) + (within - p) * this.geo.pageH
-    this.render()
-    this.relocate()
+    try {
+      const { k } = this.charsAt(chars)
+      await this.whenMeasured(k, () => {}, jump)
+      if (jump !== this.jump || this.closed) return
+      const { within } = this.charsAt(chars)
+      const p = Math.floor(within)
+      this.el.scrollTop = this.pageTop(this.starts[k] + p) + (within - p) * this.geo.pageH
+      this.render()
+      this.relocate()
+    } finally {
+      if (jump === this.jump) this.settled = jump
+    }
   }
 
   goToFraction(f: number) {
