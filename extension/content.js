@@ -4,7 +4,11 @@
 //
 // Runs on https pages but stops at once unless the page is Substack — on
 // substack.com or a newsletter's own domain (they all load from substackcdn.com)
-// — or I read itself.
+// — or X, or I read itself.
+//
+// On X only long ARTICLES count (x.com/<name>/article/<id>, or x.com/i/article/<id>) — never the feed,
+// profiles or normal posts (/status/). X changes the address without reloading the page, so whether
+// this page counts is asked again on every tick, not once when the page loads.
 ;(() => {
   // Filled in by scripts/make-extension.mjs: the one site allowed to talk to the extension.
   const APP_ORIGIN = '__APP_ORIGIN__'
@@ -45,9 +49,17 @@
     host === 'substack.com' ||
     host.endsWith('.substack.com') ||
     !!document.querySelector('link[href*="substackcdn.com"], script[src*="substackcdn.com"], img[src*="substackcdn.com"]')
-  if (!substack) return
-  // For annotate.js (notes and highlights), which runs next in this same page.
+  const onX = /^(?:www\.|mobile\.)?(?:x|twitter)\.com$/.test(host)
+  /** An X article page (not the feed, a profile or a normal post). */
+  const xArticle = () => onX && /^\/(?:i|[A-Za-z0-9_]{1,15})\/article\/\d+/.test(location.pathname)
+  /** Whether reading is counted on this page right now. Substack: always; X: only on an article. */
+  const counting = () => (onX ? xArticle() : true)
+  if (!substack && !onX) return
+  // For annotate.js (the tracker pill, "Still reading?", and on Substack notes and highlights), which runs next in this same page.
   globalThis.__irbSubstack = true
+  /** On X it only shows reading time: no notes or highlights there. */
+  globalThis.__irbReadOnly = onX
+  globalThis.__irbCounting = counting
 
   // ── On substack.com: post a Note the way Substack's own page does — from
   // this page, with your signed-in session — when the extension asks.
@@ -92,7 +104,19 @@
   /** Report the running visit every this many counted seconds. */
   const REPORT_EVERY = 15
 
-  const bodyEl = () => document.querySelector('.available-content .body.markup, .body.markup, .available-content, article .post-content')
+  const SUBSTACK_BODY = '.available-content .body.markup, .body.markup, .available-content, article .post-content'
+  // X's article page: the text sits in .x-article-body, inside [data-article-part="body"] (which holds it twice over, so it is
+  // only the fallback); older layouts used the twitterArticle* test ids. First one found, in this order.
+  const X_BODIES = ['.x-article-body', '[data-article-part="body"]', '[data-testid="twitterArticleRichTextView"]', '[data-testid="twitterArticleReadView"]']
+  const xBody = () => {
+    for (const s of X_BODIES) {
+      const el = document.querySelector(s)
+      if (el) return el
+    }
+    return null
+  }
+  const bodyEl = () => (onX ? (xArticle() ? xBody() : null) : document.querySelector(SUBSTACK_BODY))
+  globalThis.__irbBody = bodyEl // annotate.js asks the same question
   let screen = { at: 0, secs: DEFAULT_SCREEN_S }
   /** About how long the post text on screen takes to read, in seconds. */
   function screenSecs() {
@@ -188,12 +212,25 @@
 
   const meta = (sel) => document.querySelector(sel)?.getAttribute('content')?.trim() || undefined
   const here = () => location.origin + location.pathname
-  const describe = () => ({
-    url: here(),
-    title: (meta('meta[property="og:title"]') || document.title || here()).slice(0, 300),
-    publication: (meta('meta[property="og:site_name"]') || (host.endsWith('.substack.com') ? host.split('.')[0] : host === 'substack.com' ? 'Substack' : host))?.slice(0, 120),
-    author: meta('meta[name="author"]')?.slice(0, 120),
-  })
+  // An X article's tab title is "<title> | <Name> (@handle) on X". X's own page changes without a reload, and its
+  // og: tags can be left over from the page before, so the tab title (which it keeps up to date) comes first.
+  const X_TITLE = /\s*\|\s*([^|]*?)\s*\(@[^)]+\)\s*on X\s*$/
+  const describeX = () => {
+    const m = document.title.match(X_TITLE)
+    const fromTab = m ? document.title.replace(X_TITLE, '').trim() : ''
+    const title = fromTab || meta('meta[property="og:title"]') || document.querySelector('h1')?.textContent?.trim() || here()
+    return { site: 'x', url: here(), title: title.slice(0, 300), publication: 'X', author: (m?.[1] || meta('meta[name="author"]'))?.slice(0, 120) }
+  }
+  const describe = () =>
+    onX
+      ? describeX()
+      : {
+          site: 'substack',
+          url: here(),
+          title: (meta('meta[property="og:title"]') || document.title || here()).slice(0, 300),
+          publication: (meta('meta[property="og:site_name"]') || (host.endsWith('.substack.com') ? host.split('.')[0] : host === 'substack.com' ? 'Substack' : host))?.slice(0, 120),
+          author: meta('meta[name="author"]')?.slice(0, 120),
+        }
   const sameDay = (a, b) => new Date(a).toDateString() === new Date(b).toDateString()
 
   /** This page's reading today: one record per page per day. */
@@ -226,6 +263,21 @@
     if (visit && visit.url !== here()) {
       report()
       visit = null
+    }
+    if (!counting()) {
+      // On X: the feed, a profile, a normal post... is not reading time. Nothing runs, and nothing is left asking or paused.
+      if (visit) {
+        report()
+        visit = null
+      }
+      still = 0
+      sinceReport = 0
+      if (asking != null || away) {
+        asking = null
+        away = null
+        emit()
+      }
+      return
     }
     if (away && !away.back) return // paused until you're back
     if (document.visibilityState !== 'visible' || !document.hasFocus()) return

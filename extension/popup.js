@@ -38,7 +38,7 @@ async function render() {
   $('goal').textContent = String(goal)
   $('bar-fill').style.width = `${Math.min(100, (secs / (goal * 60)) * 100)}%`
   $('bar-fill').classList.toggle('done', m >= goal)
-  $('today-note').textContent = m >= goal ? 'Goal reached — nice.' : secs > 0 ? `${goal - m} min to your goal` : 'Open a Substack post and start reading.'
+  $('today-note').textContent = m >= goal ? 'Goal reached — nice.' : secs > 0 ? `${goal - m} min to your goal` : 'Open a Substack post or an X article and start reading.'
 
   const list = $('reads')
   list.replaceChildren(
@@ -62,7 +62,7 @@ async function render() {
           li.append(a, n)
           return li
         })
-      : [Object.assign(document.createElement('li'), { className: 'empty', textContent: 'Nothing read on Substack yet today.' })]),
+      : [Object.assign(document.createElement('li'), { className: 'empty', textContent: 'Nothing read on Substack or X yet today.' })]),
   )
 
   const waiting = Object.keys(pending).length

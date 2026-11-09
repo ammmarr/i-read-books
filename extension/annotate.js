@@ -9,6 +9,10 @@
   if (!globalThis.__irbSubstack || window.top !== window) return
   /** The reading clock (content.js): "Still reading?" and paused. */
   const R = globalThis.__irbReading
+  /** On X (articles only): just the reading time — no notes or highlights. */
+  const readOnly = !!globalThis.__irbReadOnly
+  /** Whether reading counts on this page right now (on X: only on an article). */
+  const counts = () => globalThis.__irbCounting?.() !== false
   // After an update, a page already open keeps this old copy, cut off from the extension; the new one
   // is put in beside it (background.js) and this one stands down (see `stop`).
   const me = {}
@@ -38,8 +42,8 @@
     }
   }
   const here = () => location.origin + location.pathname
-  /** The post's text (Substack puts it in .body.markup). */
-  const bodyEl = () => document.querySelector('.available-content .body.markup, .body.markup, .available-content, article .post-content')
+  /** The post's text (Substack puts it in .body.markup; content.js knows where X puts an article's). */
+  const bodyEl = () => (globalThis.__irbBody ? globalThis.__irbBody() : document.querySelector('.available-content .body.markup, .body.markup, .available-content, article .post-content'))
   const meta = (sel) => document.querySelector(sel)?.getAttribute('content')?.trim() || undefined
   const uuid = () => crypto.randomUUID()
 
@@ -227,18 +231,19 @@
 
   async function load() {
     url = here()
-    const list = await send({ type: 'annList', url })
+    const list = readOnly ? [] : await send({ type: 'annList', url })
     anns = Array.isArray(list) ? list : []
-    // The post's text can arrive a moment after the page (Substack's own reader): try a few times.
-    for (let i = 0; i < 10 && !bodyEl(); i++) await new Promise((r) => setTimeout(r, 500))
+    // The post's text can arrive a moment after the page (Substack's own reader, X's): try a few times.
+    for (let i = 0; i < 10 && counts() && !bodyEl(); i++) await new Promise((r) => setTimeout(r, 500))
     applyAll()
     refreshStatus()
   }
 
   async function refreshStatus() {
     // The pill only on a post (not Substack's home feed, inbox, settings…); "Still reading?" anywhere.
-    pill.hidden = !bodyEl()
+    pill.hidden = !counts() || !bodyEl()
     if (pill.hidden) panel.classList.remove('open')
+    if (!counts()) return // on X, off an article: nothing to show, nothing to ask the extension
     const s = await send({ type: 'pageStatus', url: here() })
     if (s) status = s
     renderPill()
@@ -401,6 +406,11 @@
   const $ = (k) => ui.querySelector(`[data-k="${k}"]`)
   const pill = ui.querySelector('.pill')
   const panel = ui.querySelector('.panel')
+  if (readOnly) {
+    // X: this article's time and today's goal only. The highlight switch, notes and highlights are for Substack.
+    ui.querySelector('.row').hidden = true
+    ui.querySelector('.scroll').hidden = true
+  }
 
   const mins = (s) => Math.floor(s / 60)
   const ago = (t) => {
@@ -576,6 +586,7 @@
     toastT = setTimeout(() => t.classList.remove('show'), 2200)
   }
   function setMode(on) {
+    if (readOnly) return
     mode = on
     document.documentElement.classList.toggle('irb-mode', on)
     renderPill()
@@ -585,7 +596,7 @@
   addEventListener(
     'keydown',
     (e) => {
-      if (dead) return
+      if (dead || readOnly) return
       if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyH') {
         e.preventDefault()
         e.stopImmediatePropagation()

@@ -8,7 +8,7 @@ const KEEP_DAYS = 14
 const DEFAULT_GOAL = 50
 
 // ── Storage (chrome.storage.local) ───────────────────────────────────────
-//   visits  { [id]: { id, url, title, publication, author, start, end, seconds } }  the last two weeks
+//   visits  { [id]: { id, site ('substack' | 'x'), url, title, publication, author, start, end, seconds } }  the last two weeks
 //   pending { [id]: version }   changed since the cloud last had them
 //   auth    { access_token, refresh_token, expires_at, email }
 //   goal    your overall daily goal in minutes (books and Substack together), from your I read settings
@@ -27,7 +27,7 @@ const startOfDay = (t = Date.now()) => {
   return d.getTime()
 }
 
-/** Today's reading in seconds: Substack (counted here, and synced back from I read) and books (from I read). */
+/** Today's reading in seconds: the web (Substack and X articles — counted here, and synced back from I read) and books (from I read). The `substack` field holds both. */
 function todayOf(visits, books) {
   const today = startOfDay()
   const substack = Object.values(visits).reduce((a, v) => a + (v.start >= today ? v.seconds : 0), 0)
@@ -41,7 +41,7 @@ async function updateBadge() {
   const mins = Math.floor((t.substack + t.books) / 60)
   await chrome.action.setBadgeText({ text: !auth ? '!' : mins ? String(mins) : '' })
   await chrome.action.setBadgeBackgroundColor({ color: !auth ? '#d97706' : mins >= goal ? '#16a34a' : '#0070f3' })
-  await chrome.action.setTitle({ title: !auth ? 'I read · sign in to count your Substack reading' : `I read · ${mins} of ${goal} min read today` })
+  await chrome.action.setTitle({ title: !auth ? 'I read · sign in to count your reading on Substack and X' : `I read · ${mins} of ${goal} min read today` })
 }
 
 // ── Pages report their reading ─────────────────────────────────────────────
@@ -71,6 +71,7 @@ function mergeCloud(visits, pending, cloud) {
     out[r.id] = {
       ...v,
       id: r.id,
+      site: r.site ?? v?.site,
       url: r.url ?? v?.url,
       title: r.title ?? v?.title,
       publication: r.publication ?? v?.publication,
@@ -156,7 +157,7 @@ async function doSync() {
       .map((id) => visits[id])
       .filter(Boolean)
       .map((v) => ({
-        id: v.id, site: 'substack', url: v.url, title: v.title ?? null, publication: v.publication ?? null, author: v.author ?? null,
+        id: v.id, site: v.site ?? 'substack', url: v.url, title: v.title ?? null, publication: v.publication ?? null, author: v.author ?? null,
         start_ms: v.start, end_ms: v.end, seconds: v.seconds, updated_at: Date.now(),
       }))
     if (rows.length) {
@@ -175,7 +176,7 @@ async function doSync() {
     }
     // And back: what I read has (counted here before a reinstall, or on another computer), so the
     // minutes shown here are the real total — and a read removed in the app goes here too.
-    const back = await rest(`irb_web_reads?select=id,url,title,publication,author,start_ms,end_ms,seconds,deleted&start_ms=gte.${startOfDay() - KEEP_DAYS * 864e5}`)
+    const back = await rest(`irb_web_reads?select=id,site,url,title,publication,author,start_ms,end_ms,seconds,deleted&start_ms=gte.${startOfDay() - KEEP_DAYS * 864e5}`)
     if (back?.ok) {
       const cloud = await back.json()
       await serial(async () => {
