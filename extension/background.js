@@ -224,7 +224,7 @@ async function doSync() {
   await updateBadge()
 }
 
-// ── Highlights and notes on Substack pages (annotate.js) ──────────────────
+// ── Highlights and notes on the pages of the sites in sites.js (annotate.js) ──────────────────
 //   annotations { [id]: { id, url, title, publication, kind, text, color, note, prefix, suffix, createdAt, updatedAt, deleted } }
 //   annPending  { [id]: version }   changed since the cloud last had them
 const annToRow = (a) => ({
@@ -411,12 +411,12 @@ chrome.runtime.onInstalled.addListener(async ({ reason }) => {
   // First install: open the popup's sign-in in a tab, so it's obvious what to do.
   chrome.storage.local.get('auth').then(({ auth: a }) => !a && chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?welcome=1') }))
   // Pages already open have no copy yet (install) or the old one, which can't save anything any more
-  // (update): put the new one in, so reading counts without reloading them. Off Substack both stop at once.
+  // (update): put the new one in, so reading counts without reloading them. On a site I read doesn't know, both stop at once.
   if (reason !== 'install' && reason !== 'update') return
   const tabs = await chrome.tabs.query({ url: 'https://*/*' }).catch(() => [])
   for (const t of tabs) {
     if (t.id == null || t.discarded) continue
-    chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['content.js', 'annotate.js'] }).catch(() => {})
+    chrome.scripting.executeScript({ target: { tabId: t.id }, files: ['sites.js', 'content.js', 'annotate.js'] }).catch(() => {})
   }
 })
 self.addEventListener('online', () => sync())

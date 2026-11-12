@@ -107,10 +107,10 @@ export function SubstackSettings() {
           <li>
             Click <span className="font-medium text-ink">Load unpacked</span> and choose the folder.
           </li>
-          <li>Click the I read icon in Chrome’s toolbar and sign in with this account. Then just read on Substack — on a post, the I read pill (bottom right) has your notes and highlights, and <span className="font-medium text-ink">Alt Shift H</span> highlights with I read instead of Substack.</li>
+          <li>Click the I read icon in Chrome’s toolbar and sign in with this account. Then just read on Substack or an X article — on a post, the I read pill (bottom right) has your notes and highlights, and <span className="font-medium text-ink">Alt Shift H</span> highlights with I read instead of the site’s own pop-up.</li>
         </ol>
         <p className="mt-3 text-body-sm text-mute">
-          It counts only while you’re actually reading — the tab in front, on substack.com and newsletters on their own domains. Like a book here, a post left open asks “Still reading?”, and with no answer the reading time pauses and the still time comes off. Offline, it keeps the time and sends it later.
+          It counts only while you’re actually reading — the tab in front, on substack.com, newsletters on their own domains, and X articles (never the X feed or normal posts). Like a book here, a post left open asks “Still reading?”, and with no answer the reading time pauses and the still time comes off. Offline, it keeps the time and sends it later.
         </p>
       </div>
     </div>

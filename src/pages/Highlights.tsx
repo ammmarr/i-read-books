@@ -334,8 +334,8 @@ export default function Highlights() {
                     </optgroup>
                   )}
                   {sources.articles.length > 0 && (
-                    <optgroup label="Substack">
-                      <option value="substack">All of Substack</option>
+                    <optgroup label="Web articles">
+                      <option value="substack">All web articles</option>
                       {sources.articles.map((s) => (
                         <option key={s.id} value={s.id}>{s.title} ({s.count})</option>
                       ))}

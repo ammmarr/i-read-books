@@ -1,18 +1,19 @@
-// I read — on a Substack post: a small tracker (this article's time, today's
-// goal) that opens on hover with your notes and highlights, and I read's own
-// highlighting. Substack has its own pop-up when you select text; press
-// Alt+Shift+H (⌥⇧H on a Mac) and I read's takes over until you press it again.
-// Highlights find their way back to the text by the quote and a little of
-// what's around it, and sync to I read (background.js → irb_web_annotations).
+// I read — on a post or article of a site I read knows (sites.js: Substack, X articles…): a small tracker (this
+// article's time, today's goal) that opens on hover with your notes and highlights, and I read's own highlighting.
+// A site may have its own pop-up when you select text; press Alt+Shift+H (⌥⇧H on a Mac) and I read's takes over
+// until you press it again. Highlights find their way back to the text by the quote and a little of what's around
+// it, and sync to I read (background.js → irb_web_annotations).
 // It also shows the reading clock's "Still reading?" and "Reading time paused".
+// Everything here is the same on every site; nothing is specific to one: sites.js says where the text is and
+// what to call the page.
 ;(() => {
-  if (!globalThis.__irbSubstack || window.top !== window) return
+  /** The site this page belongs to (found by content.js, which runs first). */
+  const site = globalThis.__irbSite
+  if (!site || window.top !== window) return
   /** The reading clock (content.js): "Still reading?" and paused. */
   const R = globalThis.__irbReading
-  /** On X (articles only): just the reading time — no notes or highlights. */
-  const readOnly = !!globalThis.__irbReadOnly
   /** Whether reading counts on this page right now (on X: only on an article). */
-  const counts = () => globalThis.__irbCounting?.() !== false
+  const counts = () => site.counting()
   // After an update, a page already open keeps this old copy, cut off from the extension; the new one
   // is put in beside it (background.js) and this one stands down (see `stop`).
   const me = {}
@@ -42,9 +43,8 @@
     }
   }
   const here = () => location.origin + location.pathname
-  /** The post's text (Substack puts it in .body.markup; content.js knows where X puts an article's). */
-  const bodyEl = () => (globalThis.__irbBody ? globalThis.__irbBody() : document.querySelector('.available-content .body.markup, .body.markup, .available-content, article .post-content'))
-  const meta = (sel) => document.querySelector(sel)?.getAttribute('content')?.trim() || undefined
+  /** The post's text, wherever this site keeps it. */
+  const bodyEl = () => site.body()
   const uuid = () => crypto.randomUUID()
 
   // ── Marks in the page ─────────────────────────────────────────────────────
@@ -54,7 +54,7 @@
       -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: box-shadow .2s ease; }
     mark.irb-hl[data-irb-note] { text-decoration: underline dotted; text-decoration-color: color-mix(in srgb, currentColor 45%, transparent); text-underline-offset: 3px; }
     mark.irb-hl.irb-flash { box-shadow: 0 0 0 3px rgba(0, 112, 243, .45); }
-    html.irb-mode .body.markup ::selection, html.irb-mode .available-content ::selection { background: rgba(255, 103, 25, .28); }
+    ${site.selectors.map((s) => `html.irb-mode ${s} ::selection`).join(',\n    ')} { background: rgba(255, 103, 25, .28); }
   `
   document.getElementById('irb-style')?.remove()
   style.id = 'irb-style'
@@ -195,14 +195,14 @@
   // ── State ────────────────────────────────────────────────────────────────
   let url = here()
   let anns = [] // this page's highlights and notes
-  let mode = false // I read's highlighting instead of Substack's
+  let mode = false // I read's highlighting instead of the site's own
   let status = { todaySecs: 0, articleSecs: 0, goal: 0, signedIn: true, appUrl: '' }
 
-  const describe = () => ({
-    url: here(),
-    title: (meta('meta[property="og:title"]') || document.title || here()).slice(0, 300),
-    publication: meta('meta[property="og:site_name"]'),
-  })
+  /** What a highlight or note says it's from: the page's address, title and publication, as sites.js names them. */
+  const describe = () => {
+    const { url, title, publication } = site.describe()
+    return { url, title, publication }
+  }
   const highlights = () => anns.filter((a) => a.kind === 'highlight').sort((x, y) => x.createdAt - y.createdAt)
   const noteAnn = () => anns.find((a) => a.kind === 'note')
 
@@ -231,7 +231,7 @@
 
   async function load() {
     url = here()
-    const list = readOnly ? [] : await send({ type: 'annList', url })
+    const list = counts() ? await send({ type: 'annList', url }) : [] // a page that isn't a post (X's feed…) has none
     anns = Array.isArray(list) ? list : []
     // The post's text can arrive a moment after the page (Substack's own reader, X's): try a few times.
     for (let i = 0; i < 10 && counts() && !bodyEl(); i++) await new Promise((r) => setTimeout(r, 500))
@@ -243,13 +243,13 @@
     // The pill only on a post (not Substack's home feed, inbox, settings…); "Still reading?" anywhere.
     pill.hidden = !counts() || !bodyEl()
     if (pill.hidden) panel.classList.remove('open')
-    if (!counts()) return // on X, off an article: nothing to show, nothing to ask the extension
+    if (!counts()) return // on a page that isn't a post (X's feed…): nothing to show, nothing to ask the extension
     const s = await send({ type: 'pageStatus', url: here() })
     if (s) status = s
     renderPill()
   }
 
-  // ── The UI (its own shadow root, so Substack's styles can't touch it) ──────
+  // ── The UI (its own shadow root, so the site's styles can't touch it) ──────
   const host = document.createElement('div')
   host.id = 'irb-host'
   host.style.cssText = 'all: initial; position: fixed; z-index: 2147483000; inset: auto 0 0 auto;'
@@ -381,7 +381,7 @@
       <div class="state" data-k="state" hidden></div>
     </div>
     <div class="row">
-      <div class="grow"><div>Highlight with I read</div><div class="muted" style="font-size:12px">instead of Substack’s pop-up · <kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>H</kbd></div></div>
+      <div class="grow"><div>Highlight with I read</div><div class="muted" style="font-size:12px">instead of <span data-k="sitename">the site</span>’s own pop-up · <kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>H</kbd></div></div>
       <button class="switch" role="switch" aria-checked="false" aria-label="Highlight with I read" data-k="switch"></button>
     </div>
     <div class="scroll">
@@ -406,11 +406,7 @@
   const $ = (k) => ui.querySelector(`[data-k="${k}"]`)
   const pill = ui.querySelector('.pill')
   const panel = ui.querySelector('.panel')
-  if (readOnly) {
-    // X: this article's time and today's goal only. The highlight switch, notes and highlights are for Substack.
-    ui.querySelector('.row').hidden = true
-    ui.querySelector('.scroll').hidden = true
-  }
+  $('sitename').textContent = site.name // "instead of Substack’s own pop-up", "instead of X’s own pop-up"…
 
   const mins = (s) => Math.floor(s / 60)
   const ago = (t) => {
@@ -586,7 +582,6 @@
     toastT = setTimeout(() => t.classList.remove('show'), 2200)
   }
   function setMode(on) {
-    if (readOnly) return
     mode = on
     document.documentElement.classList.toggle('irb-mode', on)
     renderPill()
@@ -596,7 +591,7 @@
   addEventListener(
     'keydown',
     (e) => {
-      if (dead || readOnly) return
+      if (dead) return
       if (e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyH') {
         e.preventDefault()
         e.stopImmediatePropagation()
@@ -617,7 +612,7 @@
     return s && !s.isCollapsed && s.rangeCount && inBody(s.anchorNode) && inBody(s.focusNode) ? s : null
   }
 
-  // While it's on, Substack's own selection pop-up never hears about the selection.
+  // While it's on, the site's own selection pop-up (Substack has one) never hears about the selection.
   for (const type of ['mouseup', 'pointerup', 'touchend']) {
     addEventListener(
       type,
@@ -776,7 +771,7 @@
     setInterval(refreshStatus, 15_000),
     setInterval(() => {
       if (!alive()) return stop()
-      // Substack's own reader changes post without reloading: start over for the new one.
+      // Some sites change post without reloading (Substack's own reader, X): start over for the new one.
       if (here() === url) return
       for (const a of highlights()) unwrap(a.id)
       anns = []
