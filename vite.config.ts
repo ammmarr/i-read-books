@@ -20,6 +20,8 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
     __APP_BUILD__: JSON.stringify(buildId()),
+    // The Chrome extension this site offers for download (Settings tells you when yours is older).
+    __EXT_VERSION__: JSON.stringify((JSON.parse(readFileSync('extension/manifest.json', 'utf8')) as { version: string }).version),
     __BUILT_AT__: String(builtAt),
     __NATIVE_FP__: JSON.stringify(nativeFingerprint()),
   },

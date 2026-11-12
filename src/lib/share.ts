@@ -71,7 +71,7 @@ if (typeof window !== 'undefined') {
 }
 
 /** Whether the I read extension is in this browser (and can post Notes: 1.1+). */
-export function useExtension(): Ext & { canPost: boolean } {
+export function useExtension(): Ext & { canPost: boolean; outdated: boolean } {
   const e = useSyncExternalStore(
     (cb) => {
       listeners.add(cb)
@@ -80,7 +80,20 @@ export function useExtension(): Ext & { canPost: boolean } {
     () => ext,
   )
   const [maj = 0, min = 0] = (e.version ?? '0.0').split('.').map(Number)
-  return { ...e, canPost: e.present && (maj > 1 || (maj === 1 && min >= 1)) }
+  return { ...e, canPost: e.present && (maj > 1 || (maj === 1 && min >= 1)), outdated: e.present && olderThan(e.version ?? '0', __EXT_VERSION__) }
+}
+
+/** The extension offered for download here (see vite.config). */
+export const LATEST_EXTENSION = __EXT_VERSION__
+
+/** "1.6.0" is older than "1.6.1". */
+function olderThan(a: string, b: string) {
+  const x = a.split('.').map(Number)
+  const y = b.split('.').map(Number)
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) < (y[i] ?? 0)
+  }
+  return false
 }
 
 /** Post a Substack Note through the extension. */

@@ -4,7 +4,7 @@ import { dailyGoal, updateSettings, useSettings } from '../lib/settings'
 import { useWebReads } from '../lib/web'
 import { relativeTime } from '../lib/format'
 import { isNative } from '../lib/native'
-import { useExtension } from '../lib/share'
+import { LATEST_EXTENSION, useExtension } from '../lib/share'
 import { SubstackMark, XMark } from './ShareQuote'
 
 /** Settings → Daily goal: one number for all your reading. */
@@ -78,6 +78,7 @@ export function SharingSettings() {
 export function SubstackSettings() {
   const reads = useWebReads()
   const last = reads?.[0]
+  const ext = useExtension()
   return (
     <div>
       <div className="rounded-md border border-hairline p-4">
@@ -99,6 +100,13 @@ export function SubstackSettings() {
           )}
         </div>
         {isNative && <p className="mt-3 text-body-sm text-body">It’s for Chrome on your PC: open I read there, Settings → Substack, to download it.</p>}
+        {ext.outdated && (
+          <p className="mt-3 rounded-sm bg-warning/10 px-3 py-2 text-body-sm text-ink">
+            <span className="font-medium">Update the extension</span> (yours is {ext.version}, the newest is {LATEST_EXTENSION}): download it, unzip it over your
+            old <span className="font-medium">i-read-substack</span> folder (chrome://extensions shows where it was loaded from), then press{' '}
+            <span className="font-medium">Reload</span> on the extension. Don’t remove it: that would forget reading time it hasn’t sent yet. Then sign in from its icon.
+          </p>
+        )}
         <ol className="mt-4 list-decimal space-y-1 pl-5 text-body-sm text-body">
           <li>Download it and unzip — you get an <span className="font-medium text-ink">i-read-substack</span> folder.</li>
           <li>

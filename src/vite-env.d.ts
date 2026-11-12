@@ -4,6 +4,8 @@
 declare const __APP_VERSION__: string
 /** Commit this build was made from. */
 declare const __APP_BUILD__: string
+/** The version of the Chrome extension in this build's download. */
+declare const __EXT_VERSION__: string
 /** When this build was made (ms). */
 declare const __BUILT_AT__: number
 /** Fingerprint of the native side this build expects (see scripts/build-info.mjs). */
