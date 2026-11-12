@@ -5,6 +5,27 @@ import { useSyncExternalStore } from 'react'
 const url = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
 
+/** The Supabase project this build talks to, by its id (the first part of its address), or '' with no cloud. */
+export const cloudProjectRef = (() => {
+  try {
+    return url ? new URL(url).hostname.split('.')[0] : ''
+  } catch {
+    return ''
+  }
+})()
+/** Which project this device's sign-in and sync records belong to (sync.ts keeps it up to date). */
+export const CLOUD_PROJECT_KEY = 'irb-cloud-project'
+// A sign-in saved for another project (the app moved to a new one) is no good here, and would only make every
+// request fail: forget it, so the app asks you to sign in to this one.
+try {
+  if (url && localStorage.getItem(CLOUD_PROJECT_KEY) !== cloudProjectRef) {
+    localStorage.removeItem('irb-auth')
+    localStorage.removeItem('irb-auth-code-verifier')
+  }
+} catch {
+  /* no storage */
+}
+
 /** Where email links (confirm, reset) should land. The Android app can't receive them, so they open the website. */
 export const SITE_URL =
   !Capacitor.isNativePlatform() && typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)

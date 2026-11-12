@@ -262,15 +262,25 @@ create policy "irb own files delete" on storage.objects for delete to authentica
 
 -- ── delete my account (called from Settings → Delete account)
 -- The app empties your storage folder first (storage rows can only be removed
--- through the Storage API); deleting the auth user then cascades to every
--- irb_* table above.
+-- through the Storage API); this then deletes every I read row of yours.
+-- Only I read's: the sign-in itself stays, because a project can be shared with
+-- other apps (AIGP's lives in the same one), and deleting it would erase those too.
 create or replace function public.irb_delete_account() returns void
 language plpgsql security definer set search_path = '' as $$
+declare uid uuid := auth.uid();
 begin
-  if auth.uid() is null then
+  if uid is null then
     raise exception 'not signed in';
   end if;
-  delete from auth.users where id = auth.uid();
+  delete from public.irb_highlights where user_id = uid;
+  delete from public.irb_bookmarks where user_id = uid;
+  delete from public.irb_sessions where user_id = uid;
+  delete from public.irb_recaps where user_id = uid;
+  delete from public.irb_lookups where user_id = uid;
+  delete from public.irb_web_reads where user_id = uid;
+  delete from public.irb_web_annotations where user_id = uid;
+  delete from public.irb_profiles where user_id = uid;
+  delete from public.irb_books where user_id = uid;
 end $$;
 
 revoke all on function public.irb_delete_account() from public, anon;

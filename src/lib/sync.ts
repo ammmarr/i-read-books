@@ -3,7 +3,7 @@ import {
   db, markSyncTransaction, readTombstones, setLocalChangeListener, writeTombstones, SYNC_TABLES,
   type Book, type Bookmark, type Highlight, type Recap, type Lookup, type Session, type SyncTable, type WebRead, type WebAnnotation,
 } from '../db/db'
-import { BUCKET, getAuthSession, onAuthChange, supabase } from './supabase'
+import { BUCKET, CLOUD_PROJECT_KEY, cloudProjectRef, getAuthSession, onAuthChange, supabase } from './supabase'
 import { formatPages, readPagesOf } from './pages'
 import { bookExt, bookMime } from './epub'
 import { kindFromId } from './recaps'
@@ -621,8 +621,46 @@ export function freshPull(timeout = 6000) {
   })
 }
 
+/**
+ * Moved to another Supabase project (a new account): the server there is empty, while this device's records say
+ * nearly everything is already up. So everything here is marked to go up again, keeping its times (the newest copy of
+ * anything still wins), book files and covers upload again, and the old project's cursors and deletions are forgotten.
+ */
+async function prepareForProject() {
+  let known: string | null
+  try {
+    known = localStorage.getItem(CLOUD_PROJECT_KEY)
+  } catch {
+    return
+  }
+  if (!supabase || known === cloudProjectRef) return
+  await db.transaction('rw', SYNC_TABLES.map((t) => db.table(t)), async () => {
+    markSyncTransaction() // not edits: nothing gets a new time
+    for (const t of SYNC_TABLES) {
+      await db.table(t).toCollection().modify((r: Record<string, unknown>) => {
+        r.dirty = 1
+        if (t === 'books') {
+          delete r.filePath
+          delete r.coverPath
+          delete r.uploadError
+        }
+      })
+    }
+  })
+  writeTombstones([])
+  setSettingsMeta({ updatedAt: getSettingsMeta().updatedAt || Date.now(), dirty: true })
+  try {
+    for (const k of Object.keys(localStorage)) if (k.startsWith('irb-sync-')) localStorage.removeItem(k)
+    localStorage.setItem(CLOUD_PROJECT_KEY, cloudProjectRef)
+  } catch {
+    /* ignore */
+  }
+}
+let projectReady: Promise<void> = Promise.resolve()
+
 async function runOnce() {
   if (!supabase) return set({ status: 'off' })
+  await projectReady
   if (!getAuthSession()) return set({ status: 'signed-out' })
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return set({ status: 'offline' })
   set({ status: 'syncing', error: null })
@@ -713,6 +751,7 @@ export async function signOutAndStop() {
 
 /** Wire up triggers once at startup. */
 export function startSync() {
+  projectReady = prepareForProject().catch((e) => console.warn('sync: getting ready for this project failed', e))
   // Once: drop "continue from…" offers left behind by mistaking this
   // device's own echoes for another device.
   try {
