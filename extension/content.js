@@ -42,7 +42,8 @@
   }
 
   const host = location.hostname
-  const site = globalThis.__irbSites?.current()
+  // A site I read knows, or any page you turned reading on for (popup, Alt+Shift+R: sites.js manual()).
+  const site = globalThis.__irbSites?.current() ?? (globalThis.__irbSites?.manualOn() ? globalThis.__irbSites.manual() : null)
   if (!site) return
   // For annotate.js (the pill, "Still reading?", notes and highlights), which runs next in this same page.
   globalThis.__irbSite = site

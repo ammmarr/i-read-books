@@ -1,4 +1,5 @@
 import { CONFIG } from './config.js'
+import { pageState, setReading } from './manual.js'
 
 const $ = (id) => document.getElementById(id)
 const startOfDay = () => {
@@ -100,7 +101,32 @@ $('sign-out').addEventListener('click', async () => {
   render()
 })
 
+// ── Reading on command: count a page I read doesn't know ──
+let tabId = null
+async function renderPage() {
+  const row = $('page')
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [])
+  tabId = tab?.id ?? null
+  const st = tabId == null ? null : await pageState(tabId)
+  // Not a web page, or a site that already counts by itself: nothing to turn on.
+  if (!st?.ok || st.known) return void (row.hidden = true)
+  row.hidden = false
+  const host = st.host.replace(/^www\./, '')
+  $('page-toggle').setAttribute('aria-checked', String(st.on))
+  $('page-title').textContent = st.on ? 'Counting this page' : 'Count this page'
+  $('page-sub').textContent = st.on ? `${host} · until you close the tab` : `${host} isn’t tracked. Turn it on to count what you read.`
+}
+$('page-toggle').addEventListener('click', async () => {
+  if (tabId == null) return
+  const on = $('page-toggle').getAttribute('aria-checked') !== 'true'
+  $('page-toggle').disabled = true
+  await setReading(tabId, on)
+  $('page-toggle').disabled = false
+  renderPage()
+})
+
 chrome.storage.onChanged.addListener(render)
+renderPage()
 render()
 // Bring the cloud up to date while the popup is open.
 chrome.runtime.sendMessage({ type: 'syncNow' }).catch(() => {})

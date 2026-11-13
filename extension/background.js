@@ -2,6 +2,7 @@
 // shows today's minutes on the icon, and sends it to your I read account
 // (table irb_web_reads) — straight away when online, later when not.
 import { CONFIG } from './config.js'
+import { pageState, setReading } from './manual.js'
 
 const KEEP_DAYS = 14
 /** I read's own defaults (books 20 + the old Substack 30), until the first sync brings yours. */
@@ -401,6 +402,18 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     return true
   }
   return false
+})
+
+// Alt+Shift+R: turn reading on (or off) for the page in front of you, on any site (manual.js).
+chrome.commands.onCommand.addListener(async (cmd) => {
+  if (cmd !== 'toggle-reading') return
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (tab?.id == null) return
+  const st = await pageState(tab.id)
+  if (!st?.ok || st.known) return
+  const now = await setReading(tab.id, !st.on)
+  chrome.action.setBadgeText({ tabId: tab.id, text: now?.on ? 'ON' : '' })
+  chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: '#0a9960' })
 })
 
 chrome.alarms.create('sync', { periodInMinutes: 1 })

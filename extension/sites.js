@@ -61,7 +61,35 @@
   /** The site this page belongs to, or null (then the extension does nothing here). */
   const current = (loc = location, doc = document) => entries.find((s) => s.matches(loc, doc)) ?? null
 
-  globalThis.__irbSites = { define, current, all: () => entries.slice() }
+  // On command: any page you turn reading on for (popup button, Alt+Shift+R). The page is remembered for this tab only
+  // (sessionStorage), so it survives a reload but ends with the tab. Turning it off makes `counting` false again.
+  const MANUAL_KEY = 'irb-reading-on'
+  const manualOn = () => {
+    try {
+      return sessionStorage.getItem(MANUAL_KEY) === '1'
+    } catch {
+      return false
+    }
+  }
+  const setManual = (on) => {
+    try {
+      on ? sessionStorage.setItem(MANUAL_KEY, '1') : sessionStorage.removeItem(MANUAL_KEY)
+    } catch {
+      /* storage blocked on this page */
+    }
+  }
+  const manual = () => {
+    const base = define({
+      id: 'web',
+      name: location.hostname.replace(/^www\./, ''),
+      match: () => false,
+      body: ['article', '[role="main"]', 'main', 'body'],
+    })
+    entries.shift() // never found by current(): only by asking
+    return { ...base, counting: () => manualOn(), body: (doc = document) => (manualOn() ? base.body(doc, location) : null) }
+  }
+
+  globalThis.__irbSites = { define, current, all: () => entries.slice(), manual, manualOn, setManual }
 
   // ── The sites ────────────────────────────────────────────────────────────────
 
