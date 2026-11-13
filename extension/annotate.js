@@ -252,7 +252,9 @@
   // ── The UI (its own shadow root, so the site's styles can't touch it) ──────
   const host = document.createElement('div')
   host.id = 'irb-host'
-  host.style.cssText = 'all: initial; position: fixed; z-index: 2147483000; inset: auto 0 0 auto;'
+  // `all: initial` on the host beats the :host rule below, so the font and color are set here too (the colors are the
+  // :host variables), or the panel falls back to the browser's serif and black text.
+  host.style.cssText = "all: initial; position: fixed; z-index: 2147483000; inset: auto 0 0 auto; font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: var(--ink);"
   document.querySelectorAll('#irb-host').forEach((el) => el.remove()) // an older copy's, from before an update
   document.documentElement.append(host)
   const ui = host.attachShadow({ mode: 'open' })
