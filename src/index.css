@@ -365,3 +365,27 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
 }
 .pdf-link:active { background: rgb(0 112 243 / 0.18); }
 .pdf-link.is-external:hover { cursor: alias; }
+
+/* ───────────────────────── Highlights outside the reader ─────────────────────────
+   The welcome screen marks your highlight inside its page with the colour you gave it. */
+:root {
+  --wash-yellow: rgb(253 224 71 / 0.55);
+  --wash-green: rgb(134 239 172 / 0.6);
+  --wash-blue: rgb(147 197 253 / 0.6);
+  --wash-pink: rgb(249 168 212 / 0.6);
+  --wash-purple: rgb(196 181 253 / 0.65);
+}
+.dark {
+  --wash-yellow: rgb(202 170 20 / 0.32);
+  --wash-green: rgb(40 170 90 / 0.32);
+  --wash-blue: rgb(50 120 230 / 0.34);
+  --wash-pink: rgb(220 60 140 / 0.32);
+  --wash-purple: rgb(140 100 230 / 0.36);
+}
+.passage-hl {
+  color: inherit;
+  padding: 2px 3px;
+  border-radius: 3px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}

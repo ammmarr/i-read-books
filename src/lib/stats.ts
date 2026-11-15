@@ -311,3 +311,97 @@ export function todaySeconds(sessions: Session[], now = Date.now()) {
   const start = startOfDay(now)
   return sessions.filter((s) => s.start >= start).reduce((a, s) => a + s.seconds, 0)
 }
+
+// ── When you'll finish, and what you've finished ─────────────────────────
+
+/** How far back "your pace in this book" looks. */
+export const PACE_DAYS = 14
+
+export interface FinishGuess {
+  book: Book
+  /** 0–1. */
+  progress: number
+  pagesRead: number
+  /** Start of the day you'd finish on, or null when there's too little recent reading to tell. */
+  date: number | null
+  /** Days from today to `date`. */
+  days: number | null
+  /** Average reading in this book per day over the last PACE_DAYS days (seconds). */
+  secondsPerDay: number
+  /** Days you opened it in the last PACE_DAYS days. */
+  activeDays: number
+}
+
+/**
+ * When you'd finish a book at your pace in it over the last two weeks: the
+ * distinct pages you read in it then, spread over all 14 days (days you didn't
+ * read count too — that's what your pace really is). Under two reading days or
+ * five pages it doesn't guess.
+ */
+export function finishGuess(book: Book, sessions: Session[], now = Date.now()): FinishGuess {
+  const since = addDays(startOfDay(now), -(PACE_DAYS - 1))
+  const recent = sessions.filter((s) => s.bookId === book.id && s.start >= since)
+  const pages = new Set(recent.flatMap((s) => s.pages)).size
+  const activeDays = new Set(recent.filter((s) => s.seconds >= 60).map((s) => dayKey(s.start))).size
+  const seconds = recent.reduce((a, s) => a + s.seconds, 0)
+  const pagesRead = readCount(book)
+  const remaining = Math.max(0, book.pageCount - pagesRead)
+  const base = { book, progress: book.pageCount ? Math.min(1, pagesRead / book.pageCount) : 0, pagesRead, secondsPerDay: seconds / PACE_DAYS, activeDays }
+  if (book.pageCount > 0 && remaining === 0) return { ...base, date: startOfDay(now), days: 0 }
+  if (activeDays < 2 || pages < 5) return { ...base, date: null, days: null }
+  const days = Math.max(1, Math.ceil(remaining / (pages / PACE_DAYS)))
+  // Past two years it isn't a date anyone plans by.
+  if (days > 730) return { ...base, date: null, days: null }
+  return { ...base, date: addDays(startOfDay(now), days), days }
+}
+
+/** The books you're reading now: marked Reading, or opened in the last month and started. */
+export function booksInProgress(books: Book[], now = Date.now()) {
+  return books.filter(
+    (b) => b.status !== 'finished' && b.pageCount > 0 && readCount(b) > 0 && (b.status === 'reading' || (b.lastOpenedAt ?? 0) > now - 30 * DAY),
+  )
+}
+
+/** Finish dates for everything you're reading, soonest first; books without a date last, most recently opened first. */
+export function finishGuesses(books: Book[], sessions: Session[], now = Date.now()) {
+  return booksInProgress(books, now)
+    .map((b) => finishGuess(b, sessions, now))
+    .sort((a, b) => {
+      if (a.date != null && b.date != null) return a.date - b.date
+      if (a.date != null) return -1
+      if (b.date != null) return 1
+      return (b.book.lastOpenedAt ?? 0) - (a.book.lastOpenedAt ?? 0)
+    })
+}
+
+/** Finished books with a finish date, newest first. `year` limits it to one calendar year. */
+export function finishedBooks(books: Book[], year?: number) {
+  return books
+    .filter((b) => b.status === 'finished' && b.finishedAt && (year == null || new Date(b.finishedAt).getFullYear() === year))
+    .sort((a, b) => b.finishedAt! - a.finishedAt!)
+}
+
+/**
+ * Days a finished book took: from when you started it to when you finished.
+ * Without a start date, from the first time you read it (not preferred: a
+ * re-read would count from the first reading).
+ */
+export function daysTaken(book: Book, sessions: Session[]) {
+  if (!book.finishedAt) return null
+  const start =
+    book.startedAt != null && book.startedAt <= book.finishedAt
+      ? book.startedAt
+      : sessions.reduce((m, s) => (s.bookId === book.id && s.start < m ? s.start : m), Infinity)
+  if (!Number.isFinite(start) || start > book.finishedAt) return null
+  return Math.max(1, Math.round((startOfDay(book.finishedAt) - startOfDay(start)) / DAY) + 1)
+}
+
+/** Where this year's count would end up at the same rate. Null in the first two weeks or with nothing finished. */
+export function onTrackFor(finishedThisYear: number, now = Date.now()) {
+  const d = new Date(now)
+  const jan1 = new Date(d.getFullYear(), 0, 1).getTime()
+  const dayOfYear = Math.floor((startOfDay(now) - jan1) / DAY) + 1
+  if (finishedThisYear < 1 || dayOfYear < 14) return null
+  const daysInYear = Math.round((new Date(d.getFullYear() + 1, 0, 1).getTime() - jan1) / DAY)
+  return Math.max(finishedThisYear, Math.round((finishedThisYear / dayOfYear) * daysInYear))
+}

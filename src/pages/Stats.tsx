@@ -16,9 +16,10 @@ import { Monogram } from './LibrarySubstack'
 import { dailyGoal, useSettings } from '../lib/settings'
 import { articlesOf, newslettersOf, useAllReading } from '../lib/web'
 import { useCountUp } from '../lib/hooks'
-import { compact, formatDuration, formatDurationLong, pluralize } from '../lib/format'
+import { compact, formatDate, formatDuration, formatDurationLong, pluralize } from '../lib/format'
 import {
-  RANGES, addDays, bookStats, buckets, dailyTotals, heatmap, hourOfDay, previousWindow, rangeStart, startOfDay, streaks, summarize, type RangeKey,
+  PACE_DAYS, RANGES, addDays, bookStats, buckets, dailyTotals, daysTaken, finishGuesses, finishedBooks, heatmap, hourOfDay, onTrackFor, previousWindow, rangeStart,
+  startOfDay, streaks, summarize, type RangeKey,
 } from '../lib/stats'
 
 /** All your reading — books and Substack — as one: one total, one goal, one colour. */
@@ -135,6 +136,9 @@ function Dashboard({ range, sessions, bookSessions, reads, books }: {
           <Tile label="Sessions" value={compact(sum.sessions)} sub={sum.sessions ? `avg ${formatDuration(sum.seconds / sum.sessions, { short: true })}` : undefined} />
         </div>
       </div>
+
+      <FinishingNext books={books} sessions={bookSessions} />
+      <BooksFinished books={books} sessions={bookSessions} />
 
       {/* ── Time chart ── */}
       <Card className="p-5 sm:p-6">
@@ -258,6 +262,168 @@ function Dashboard({ range, sessions, bookSessions, reads, books }: {
         </Card>
       </div>
     </div>
+  )
+}
+
+/** When you'll finish each book you're reading, at your pace in it lately. */
+function FinishingNext({ books, sessions }: { books: Book[]; sessions: Session[] }) {
+  const guesses = useMemo(() => finishGuesses(books, sessions), [books, sessions])
+  if (!guesses.length) return null
+  return (
+    <Card className="p-5 sm:p-6">
+      <h2 className="text-heading-md text-ink">Finishing next</h2>
+      <p className="mb-3 text-body-md text-mute">When you’ll finish each book you’re reading, at your pace in it over the last {PACE_DAYS} days.</p>
+      <ul className="-mx-2">
+        {guesses.slice(0, 5).map((g) => (
+          <li key={g.book.id} className="border-t border-hairline">
+            <Link to={`/book/${g.book.id}`} className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-sm px-2 py-4 transition-colors hover:bg-hairline-soft">
+              <div className="flex min-w-0 flex-[999_1_320px] items-center gap-3.5">
+                <div className="w-10 shrink-0 rounded-[2px] shadow-cover">
+                  <BookCover book={g.book} rounded="rounded-[2px]" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <span className="truncate text-label-sm text-ink">{g.book.title}</span>
+                    {g.book.author && <span className="hidden truncate text-body-sm text-mute sm:inline">{g.book.author}</span>}
+                  </div>
+                  <ProgressBar value={g.progress} thin className="mt-1.5" />
+                  <div className="mt-1 text-body-sm tabular text-mute">
+                    {Math.round(g.progress * 100)}% · {g.pagesRead} of {g.book.pageCount} pages
+                  </div>
+                </div>
+              </div>
+              <div className="flex-[1_1_260px] sm:text-right">
+                {g.date != null ? (
+                  <>
+                    <div className="text-heading-md tabular text-ink">{formatDate(g.date)}</div>
+                    <div className="text-body-sm text-mute">
+                      {g.days === 0 ? 'Every page read' : `in ${pluralize(g.days ?? 0, 'day')} · about ${formatDurationLong(g.secondsPerDay)} a day here`}
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-body-md text-body">Read a little more to see a date</div>
+                    <div className="text-body-sm text-mute">
+                      {g.activeDays === 0 ? `Not opened in the last ${PACE_DAYS} days` : `Read on ${pluralize(g.activeDays, 'day')} of the last ${PACE_DAYS}`}
+                    </div>
+                  </>
+                )}
+              </div>
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+/** Books you've finished: this year (and where that's heading) or all time. */
+function BooksFinished({ books, sessions }: { books: Book[]; sessions: Session[] }) {
+  const year = new Date().getFullYear()
+  const [scope, setScope] = useState<'year' | 'all'>('year')
+  const all = useMemo(() => finishedBooks(books), [books])
+  if (!all.length) return null
+
+  const inYear = all.filter((b) => new Date(b.finishedAt!).getFullYear() === year)
+  const list = scope === 'year' ? inYear : all
+  const onTrack = onTrackFor(inYear.length)
+  const taken = list.map((b) => daysTaken(b, sessions)).filter((d): d is number => d != null)
+  const avg = taken.length ? Math.round(taken.reduce((a, d) => a + d, 0) / taken.length) : null
+  const firstYear = new Date(all[all.length - 1].finishedAt!).getFullYear()
+  const bars =
+    scope === 'year'
+      ? Array.from({ length: 12 }, (_, m) => {
+          const d = new Date(year, m, 1)
+          return {
+            key: String(m),
+            label: d.toLocaleDateString(undefined, { month: 'narrow' }),
+            title: d.toLocaleDateString(undefined, { month: 'long' }),
+            n: inYear.filter((b) => new Date(b.finishedAt!).getMonth() === m).length,
+          }
+        })
+      : Array.from({ length: year - firstYear + 1 }, (_, i) => {
+          const y = firstYear + i
+          return { key: String(y), label: String(y), title: String(y), n: all.filter((b) => new Date(b.finishedAt!).getFullYear() === y).length }
+        })
+  const max = Math.max(1, ...bars.map((b) => b.n))
+  const dec31 = new Date(year, 11, 31).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+
+  return (
+    <Card className="p-5 sm:p-6">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-heading-md text-ink">Books finished</h2>
+        <Segmented
+          size="sm"
+          value={scope}
+          onChange={setScope}
+          ariaLabel="Which books"
+          options={[
+            { value: 'year', label: String(year) },
+            { value: 'all', label: 'All time' },
+          ]}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
+        <div className="flex-[1_1_220px]">
+          <div className="flex items-baseline gap-2.5 text-ink">
+            <span className="text-[56px] font-semibold leading-none tracking-[-2.4px] tabular">{list.length}</span>
+            <span className="text-body-lg text-body">{list.length === 1 ? 'book' : 'books'} {scope === 'year' ? 'this year' : 'in all'}</span>
+          </div>
+          <p className="mt-3 text-body-md text-body">
+            {scope === 'year' && onTrack != null && onTrack > inYear.length && (
+              <>On track for <span className="font-semibold text-ink">{onTrack}</span> by {dec31}. </>
+            )}
+            {scope === 'year' && !inYear.length && <>None yet this year. Your last was {all[0].title}, on {formatDate(all[0].finishedAt!)}. </>}
+            {avg != null && (
+              <>A book takes you <span className="font-semibold text-ink">{pluralize(avg, 'day')}</span> on average.</>
+            )}
+          </p>
+        </div>
+        <div className="min-w-0 flex-[999_1_420px]">
+          <div
+            role="img"
+            aria-label={`Books finished per ${scope === 'year' ? 'month' : 'year'}: ${bars.map((b) => `${b.title} ${b.n}`).join(', ')}`}
+            className="grid h-24 items-end gap-1.5"
+            style={{ gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))` }}
+          >
+            {bars.map((b) => (
+              <div key={b.key} className="flex h-full flex-col items-center justify-end gap-1.5" title={`${b.title}: ${pluralize(b.n, 'book')}`}>
+                <motion.div
+                  className={`w-full max-w-7 rounded-[4px] ${b.n ? 'bg-seq-3' : 'bg-hairline-soft'}`}
+                  initial={{ height: 0 }}
+                  animate={{ height: b.n ? 12 + (b.n / max) * 64 : 4 }}
+                  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
+                />
+                <span className="text-[11px] leading-none text-mute">{b.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {list.length > 0 && (
+        <ul className="mt-7 grid grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
+          {list.slice(0, 12).map((b) => {
+            const d = daysTaken(b, sessions)
+            return (
+              <li key={b.id} className="min-w-0">
+                <Link to={`/book/${b.id}`} className="group block">
+                  <div className="rounded-[4px] shadow-cover transition-shadow duration-300 group-hover:shadow-cover-lift">
+                    <BookCover book={b} />
+                  </div>
+                  <div className="mt-2 line-clamp-2 text-label-sm text-ink">{b.title}</div>
+                  <div className="mt-0.5 text-body-sm text-mute">
+                    {formatDate(b.finishedAt!)}
+                    {d != null && ` · took ${pluralize(d, 'day')}`}
+                  </div>
+                </Link>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </Card>
   )
 }
 

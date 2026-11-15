@@ -97,6 +97,12 @@ export default function SettingsPage() {
       </Group>
 
       <Group title="Reading">
+        <Toggle
+          label="Welcome screen"
+          hint="When you open I read: one of your highlights in its page, and how your reading is going."
+          checked={s.welcomeScreen}
+          onChange={(v) => updateSettings({ welcomeScreen: v })}
+        />
         <Toggle label="Hide controls while reading" hint="Scroll up or tap the page to bring them back" checked={s.autoHideChrome} onChange={(v) => updateSettings({ autoHideChrome: v })} />
         <Toggle label="Keep screen on" hint="Stops your tablet from dimming mid-chapter" checked={s.keepAwake} onChange={(v) => updateSettings({ keepAwake: v })} />
         <Toggle label="Show session timer" hint="A small clock in the reader’s top bar" checked={s.showSessionTimer} onChange={(v) => updateSettings({ showSessionTimer: v })} />

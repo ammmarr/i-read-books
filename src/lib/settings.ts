@@ -18,6 +18,8 @@ export interface Settings {
   recapSections: boolean
   /** Books where you said "don't ask" for recaps. */
   recapsOffBooks: string[]
+  /** When you open I read: one of your highlights in its page, and how your reading is going. */
+  welcomeScreen: boolean
   /** The old Substack goal: no longer shown or set (see dailyGoal). */
   substackGoalMinutes: number
   /** Your daily reading goal in minutes — the one goal; books and Substack both count. null = not set yet (see dailyGoal). */
@@ -43,6 +45,7 @@ const DEFAULTS: Settings = {
   chapterRecaps: true,
   recapSections: true,
   recapsOffBooks: [],
+  welcomeScreen: true,
   substackGoalMinutes: 30,
   totalGoalMinutes: null,
   nightShift: 'off',
@@ -80,7 +83,7 @@ export function getSettings() {
 }
 
 /** Settings that follow you across devices (theme stays per-device). */
-export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapSections', 'recapsOffBooks', 'substackGoalMinutes', 'totalGoalMinutes']
+export const SYNCED_SETTINGS: (keyof Settings)[] = ['dailyGoalMinutes', 'pageTheme', 'keepAwake', 'autoHideChrome', 'showSessionTimer', 'chapterRecaps', 'recapSections', 'recapsOffBooks', 'welcomeScreen', 'substackGoalMinutes', 'totalGoalMinutes']
 const META_KEY = 'irb-settings-meta'
 
 export function getSettingsMeta(): { updatedAt: number; dirty: boolean } {

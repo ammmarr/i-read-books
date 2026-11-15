@@ -9,6 +9,8 @@ declare module 'foliate-js/view.js' {
     id: string
     size: number
     linear?: string
+    /** The section as a document of its own (sanitized like every page). */
+    createDocument?: () => Promise<Document>
   }
   export interface FoliateBook {
     metadata?: { title?: unknown; author?: unknown; language?: unknown }
@@ -82,6 +84,9 @@ declare module 'foliate-js/epubcfi.js' {
   export function joinIndir(...xs: string[]): string
   export function fromRange(range: Range): string
   export const fake: { fromIndex: (i: number) => string; toIndex: (part: unknown) => number }
+  /** A CFI's steps, per indirection — or, for a range, the shared `parent` and its `start` and `end`. */
+  export function parse(cfi: string): unknown[] | { parent: unknown[]; start: unknown[]; end: unknown[] }
+  export function toRange(doc: Document, parts: unknown): Range
 }
 
 declare module 'foliate-js/search.js' {
