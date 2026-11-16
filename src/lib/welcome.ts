@@ -183,7 +183,7 @@ export function markShown(id: string) {
  * A highlight to show: one not seen lately, from a book that's on this device
  * when there is one (so it can be shown in its page), never `exclude`.
  */
-export async function pickHighlight(exclude?: string): Promise<{ highlight: Highlight; book: Book } | null> {
+export async function pickHighlight(exclude?: string): Promise<{ highlight: Highlight; book: Book; others: string[] } | null> {
   const [highlights, books, fileIds] = await Promise.all([db.highlights.toArray(), db.books.toArray(), db.files.toCollection().primaryKeys()])
   const byId = new Map(books.map((b) => [b.id, b]))
   const local = new Set(fileIds.map(String))
@@ -199,7 +199,13 @@ export async function pickHighlight(exclude?: string): Promise<{ highlight: High
     ? fresh
     : [...pool].sort((a, b) => recent.indexOf(b.id) - recent.indexOf(a.id)).slice(0, Math.max(1, Math.ceil(pool.length / 3)))
   const highlight = from[Math.floor(Math.random() * from.length)]
-  return { highlight, book: byId.get(highlight.bookId)! }
+  // A few of your other highlights: the chosen one's words roll in through theirs.
+  const others: string[] = []
+  for (let i = 0; i < 60 && others.length < 24 && ok.length > 1; i++) {
+    const h = ok[Math.floor(Math.random() * ok.length)]
+    if (h.id !== highlight.id) others.push(h.text)
+  }
+  return { highlight, book: byId.get(highlight.bookId)!, others }
 }
 
 // ── How your reading is going ────────────────────────────────────────────
@@ -208,23 +214,32 @@ export type LineKind = 'finished' | 'month' | 'streak' | 'finishing' | 'allTime'
 export interface Line {
   kind: LineKind
   head: string
+  /** `head` in pieces: the numbers roll up to their value on the welcome screen, the text doesn't. */
+  parts: Part[]
   sub: string
   /** For 'finished': the book, so it's celebrated once. */
   bookId?: string
 }
 
-/** "45 minutes", "1 hour 20 minutes", "11 hours" — for sentences. */
-export function spoken(seconds: number) {
+/** `spoken` in pieces, numbers apart: [1, " hour ", 20, " minutes"]. */
+function spokenParts(seconds: number): Part[] {
   const m = Math.max(0, Math.round(seconds / 60))
-  if (m < 60) return `${m} ${m === 1 ? 'minute' : 'minutes'}`
+  if (m < 60) return [m, ` ${m === 1 ? 'minute' : 'minutes'}`]
   const h = Math.floor(m / 60)
   const r = m % 60
-  const hours = `${h} ${h === 1 ? 'hour' : 'hours'}`
-  return r && h < 10 ? `${hours} ${r} ${r === 1 ? 'minute' : 'minutes'}` : hours
+  const hours: Part[] = [h, ` ${h === 1 ? 'hour' : 'hours'}`]
+  return r && h < 10 ? [...hours, ' ', r, ` ${r === 1 ? 'minute' : 'minutes'}`] : hours
+}
+
+/** "45 minutes", "1 hour 20 minutes", "11 hours" — for sentences. */
+export function spoken(seconds: number) {
+  return spokenParts(seconds).join('')
 }
 
 const longDate = (ts: number) => new Date(ts).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
 const books = (n: number) => `${n} ${n === 1 ? 'book' : 'books'}`
+const bookParts = (n: number): Part[] => [n, ` ${n === 1 ? 'book' : 'books'}`]
+const line = (kind: LineKind, parts: Part[], sub: string, bookId?: string): Line => ({ kind, head: parts.join(''), parts, sub, ...(bookId ? { bookId } : {}) })
 
 export interface Progress {
   streak: number
@@ -280,12 +295,14 @@ export function readingProgress({ all, bookSessions, allBooks, goalMinutes, now 
   const justDone = finished.find((b) => now - b.finishedAt! < 2 * 86_400_000)
   if (justDone) {
     const when = startOfDay(justDone.finishedAt!) === startOfDay(now) ? 'today' : 'yesterday'
-    lines.push({
-      kind: 'finished',
-      bookId: justDone.id,
-      head: `You finished ${justDone.title} ${when}.`,
-      sub: `That’s ${books(finished.length)} this year${onTrack && onTrack > finished.length ? `, on track for ${onTrack}` : ''}.`,
-    })
+    lines.push(
+      line(
+        'finished',
+        ['You finished ', justDone.title, ` ${when}.`],
+        `That’s ${books(finished.length)} this year${onTrack && onTrack > finished.length ? `, on track for ${onTrack}` : ''}.`,
+        justDone.id,
+      ),
+    )
   }
 
   // This month, and how it compares with last month at the same point.
@@ -298,30 +315,31 @@ export function readingProgress({ all, bookSessions, allBooks, goalMinutes, now 
     const prevSamePoint = Math.min(monthStart, addDays(prevStart, d.getDate()))
     const ahead = month - sumBetween(prevStart, prevSamePoint)
     const prevName = new Date(prevStart).toLocaleDateString(undefined, { month: 'long' })
-    lines.push({
-      kind: 'month',
-      head: `You’ve read ${spoken(month)} this month.`,
-      // Only ever said when you're ahead: it's there to cheer, not to scold.
-      sub: `About ${spoken(month / d.getDate())} a day${sumBetween(prevStart, prevSamePoint) > 0 && ahead >= 10 * 60 ? `, ${spoken(ahead)} ahead of where ${prevName} was by now` : ''}.`,
-    })
+    lines.push(
+      line(
+        'month',
+        ['You’ve read ', ...spokenParts(month), ' this month.'],
+        // Only ever said when you're ahead: it's there to cheer, not to scold.
+        `About ${spoken(month / d.getDate())} a day${sumBetween(prevStart, prevSamePoint) > 0 && ahead >= 10 * 60 ? `, ${spoken(ahead)} ahead of where ${prevName} was by now` : ''}.`,
+      ),
+    )
   }
 
   if (st.current >= 2) {
-    lines.push({
-      kind: 'streak',
-      head: `${st.current} days in a row now.${st.longest > st.current ? ` Your best is ${st.longest}.` : st.current >= 3 ? ' Your longest yet.' : ''}`,
-      sub: todayLine,
-    })
+    const best: Part[] = st.longest > st.current ? [' Your best is ', st.longest, '.'] : st.current >= 3 ? [' Your longest yet.'] : []
+    lines.push(line('streak', [st.current, ' days in a row now.', ...best], todayLine))
   }
 
   const next = guesses.find((g) => g.date != null && (g.days ?? 0) > 0)
   if (next) {
     const left = Math.max(0, next.book.pageCount - readCount(next.book))
-    lines.push({
-      kind: 'finishing',
-      head: `At your pace, you’ll finish ${next.book.title} on ${longDate(next.date!)}.`,
-      sub: `${Math.round(next.progress * 100)}% read, ${left} ${left === 1 ? 'page' : 'pages'} to go.`,
-    })
+    lines.push(
+      line(
+        'finishing',
+        ['At your pace, you’ll finish ', next.book.title, ` on ${longDate(next.date!)}.`],
+        `${Math.round(next.progress * 100)}% read, ${left} ${left === 1 ? 'page' : 'pages'} to go.`,
+      ),
+    )
   }
 
   const total = all.reduce((t, s) => t + s.seconds, 0)
@@ -329,21 +347,25 @@ export function readingProgress({ all, bookSessions, allBooks, goalMinutes, now 
   if (total >= 3600 && Number.isFinite(first)) {
     const everFinished = finishedBooks(allBooks).length
     const pages = new Set(bookSessions.flatMap((s) => s.pages.map((p) => `${s.bookId}:${p}`))).size
-    lines.push({
-      kind: 'allTime',
-      head: `${spoken(total)} of reading since you started in ${new Date(first).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}.`,
-      sub: everFinished
-        ? `${books(everFinished)} finished along the way, and ${pages.toLocaleString()} pages read.`
-        : `${pages.toLocaleString()} pages read along the way.`,
-    })
+    lines.push(
+      line(
+        'allTime',
+        [...spokenParts(total), ` of reading since you started in ${new Date(first).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}.`],
+        everFinished
+          ? `${books(everFinished)} finished along the way, and ${pages.toLocaleString()} pages read.`
+          : `${pages.toLocaleString()} pages read along the way.`,
+      ),
+    )
   }
 
   if (finished.length >= 1) {
-    lines.push({
-      kind: 'year',
-      head: `${books(finished.length)} finished this year.`,
-      sub: onTrack && onTrack > finished.length ? `At this pace, ${onTrack} by the end of December.` : 'Every one of them counted here.',
-    })
+    lines.push(
+      line(
+        'year',
+        [...bookParts(finished.length), ' finished this year.'],
+        onTrack && onTrack > finished.length ? `At this pace, ${onTrack} by the end of December.` : 'Every one of them counted here.',
+      ),
+    )
   }
 
   return {
@@ -412,4 +434,54 @@ export function partOfDay(now = Date.now()) {
   const h = d.getHours()
   const part = h < 5 ? 'night' : h < 12 ? 'morning' : h < 18 ? 'afternoon' : h < 22 ? 'evening' : 'night'
   return `${d.toLocaleDateString(undefined, { weekday: 'long' })} ${part}`
+}
+
+// ── The welcome screen's motion ──────────────────────────────────────────
+
+/** A line's head in pieces: on the welcome screen the numbers roll up to their value, the words don't. */
+export type Part = string | number
+
+export interface RollWord {
+  word: string
+  /** The four words it rolls through before it settles. */
+  decoys: string[]
+}
+
+/** Written right to left, or without spaces between words: shown still rather than rolled. */
+const NO_ROLL =
+  /[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u
+const bare = (w: string) => w.replace(/[^\p{L}\p{N}'’-]/gu, '')
+
+/**
+ * How the highlight's words roll into place on the welcome screen: each one
+ * through four words of about its length, taken from your other highlights
+ * (and the text around this one, when you have few). Null when the text
+ * shouldn't roll: see NO_ROLL, or a word too long to wrap.
+ */
+export function rollPlan(text: string, from: string[]): RollWord[] | null {
+  const words = text.split(/\s+/).filter(Boolean)
+  if (!words.length || words.length > 120 || NO_ROLL.test(text) || words.some((w) => w.length > 24)) return null
+  const pool = [...new Set(from.join(' ').split(/\s+/).map(bare).filter((w) => w.length > 1 && w.length <= 24))]
+  const all = pool.length >= 8 ? pool : [...pool, ...words.map(bare).filter((w) => w.length > 1)]
+  if (!all.length) return null
+  const byLength = new Map<number, string[]>()
+  const near = (len: number) => {
+    let list = byLength.get(len)
+    if (!list) {
+      list = all
+      for (const d of [1, 2, 3]) {
+        const m = all.filter((w) => Math.abs(w.length - len) <= d)
+        if (m.length >= 4) {
+          list = m
+          break
+        }
+      }
+      byLength.set(len, list)
+    }
+    return list
+  }
+  return words.map((word) => {
+    const list = near(word.length)
+    return { word, decoys: Array.from({ length: 4 }, () => list[Math.floor(Math.random() * list.length)]) }
+  })
 }

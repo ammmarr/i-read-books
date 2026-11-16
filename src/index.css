@@ -389,3 +389,67 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
+
+/* ───────────────────────── Welcome screen motion ─────────────────────────
+   Opening I read (.wb-in): the line about you rises and its numbers roll up to
+   their value, the page fades in, the highlight's words roll in through other
+   words you've highlighted, left to right, then the marker draws across them.
+   Another (.wb-swap) does the same, quicker. Reels need --lh: the line height
+   of the text they sit in. Components: components/WelcomeMotion.tsx. */
+.wb-reel {
+  display: inline-block;
+  height: var(--lh);
+  overflow: hidden;
+  vertical-align: top;
+  -webkit-mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent);
+  mask-image: linear-gradient(transparent, #000 15%, #000 85%, transparent);
+}
+.wb-col {
+  display: block;
+  animation: wb-roll var(--dur, 900ms) var(--ease-out-expo) var(--delay, 0ms) both;
+}
+.wb-col > span { display: block; height: var(--lh); line-height: var(--lh); white-space: nowrap; }
+.wb-digit { font-variant-numeric: tabular-nums; }
+.wb-digit .wb-col { transform: translateY(calc(var(--to) * var(--lh) * -1)); }
+/* A word's reel is as wide as the word: the four it rolls through sit above it, out of the flow. */
+.wb-word .wb-col {
+  position: relative;
+  padding-top: calc(var(--lh) * 4);
+  transform: translateY(calc(var(--lh) * -4));
+  animation-timing-function: cubic-bezier(0.2, 0.75, 0.2, 1);
+}
+.wb-word .wb-decoy { position: absolute; left: 0; color: var(--color-mute); }
+.wb-word .wb-decoy:nth-child(1) { top: 0; }
+.wb-word .wb-decoy:nth-child(2) { top: var(--lh); }
+.wb-word .wb-decoy:nth-child(3) { top: calc(var(--lh) * 2); }
+.wb-word .wb-decoy:nth-child(4) { top: calc(var(--lh) * 3); }
+@keyframes wb-roll { from { transform: translateY(0); } }
+
+/* The marker: one sweep through every line in reading order (slice, not clone). */
+.wb-mark {
+  background-color: transparent;
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
+  animation: wb-draw var(--dur, 600ms) cubic-bezier(0.45, 0, 0.25, 1) var(--delay, 0ms) both;
+}
+@keyframes wb-draw { from { background-size: 0% 100%; } }
+
+@keyframes wb-fade { from { opacity: 0; } }
+@keyframes wb-rise { from { opacity: 0; transform: translateY(var(--rise, 8px)); } }
+@keyframes wb-fill { from { transform: scaleX(0); } }
+.wb-eyebrow { animation: wb-fade 400ms var(--ease-out-expo) both; }
+.wb-in .wb-head { animation: wb-rise 500ms var(--ease-out-expo) both; }
+.wb-in .wb-sub { --rise: 6px; animation: wb-rise 450ms var(--ease-out-expo) 100ms both; }
+.wb-in .wb-page { animation: wb-fade 400ms var(--ease-out-expo) 100ms both; }
+.wb-swap .wb-head { animation: wb-fade 300ms var(--ease-out-expo) both; }
+.wb-swap .wb-sub { --rise: 6px; animation: wb-rise 300ms var(--ease-out-expo) 40ms both; }
+.wb-swap .wb-page { animation: wb-fade 300ms var(--ease-out-expo) 60ms both; }
+.wb-buttons { --rise: 6px; animation: wb-rise 450ms var(--ease-out-expo) 200ms both; }
+.wb-strip { animation: wb-fade 400ms var(--ease-out-expo) 150ms both; }
+.wb-bar { animation: wb-fill 900ms var(--ease-out-expo) 250ms both; }
+@media (prefers-reduced-motion: reduce) {
+  /* Everything is simply there: numbers and words at their value, the highlight already marked. */
+  .wb-col, .wb-mark, .wb-bar { animation: none; }
+}
