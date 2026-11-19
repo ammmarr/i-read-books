@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Timer, Trophy, Type,
+  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
@@ -11,7 +11,6 @@ import { closePdf, flattenOutline, openPdfBlob, readOutline, resolveDest, type O
 import { dailyGoal, loadBookView, saveBookView, useSettings, type ZoomMode } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
 import { useIsMobile, useIsTouch, vibrate } from '../lib/hooks'
-import { formatDuration } from '../lib/format'
 import { IconButton } from '../components/ui/Button'
 import { useToast } from '../components/ui/Toast'
 import { BookCover } from '../components/BookCover'
@@ -43,6 +42,7 @@ import { Menu } from '../components/ui/Menu'
 import { RecapWriter } from '../components/recap/RecapWriter'
 import { RecapPromptCard } from '../components/recap/RecapPrompt'
 import { StillReading } from './StillReading'
+import { ReadingClock } from './ReadingClock'
 import { EpubReader } from './EpubReader'
 import { isEpubBook, openEpub } from '../lib/epub'
 import type { FoliateBook } from 'foliate-js/view.js'
@@ -811,7 +811,7 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     },
     [text],
   )
-  const { sessionSeconds, idle, asking, away, stillHere, countAway, dismissAway } = useReadingSession({
+  const { sessionSeconds, asking, away, paused, stillHere, countAway, dismissAway, pause } = useReadingSession({
     bookId: book.id,
     currentPage,
     enabled: true,
@@ -825,8 +825,8 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
     },
   })
 
-  // Away (no answer to "Still reading?"): let the screen sleep after all.
-  const awayNow = !!away && !away.back
+  // Away (no answer to "Still reading?") or paused with the button: let the screen sleep after all.
+  const awayNow = (!!away && !away.back) || paused
   useEffect(() => {
     if (!settings.keepAwake || awayNow) return
     if (isNative) {
@@ -1791,14 +1791,8 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
                   </motion.div>
                 </AnimatePresence>
               </div>
-              {settings.showSessionTimer && sessionSeconds > 0 && (
-                <div
-                  title={idle ? 'Paused' : 'Reading time this session'}
-                  className={`mr-1 hidden h-7 items-center gap-1.5 rounded-full border border-hairline px-2.5 text-body-sm tabular transition-colors sm:inline-flex ${idle ? 'text-faint' : 'text-body'}`}
-                >
-                  <Timer className={`size-3.5 ${idle ? '' : 'text-link'}`} />
-                  {formatDuration(sessionSeconds)}
-                </div>
+              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
+                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="max-sm:hidden" />
               )}
               {recapTargets.section && recapTargets.chapter ? (
                 <Menu
@@ -1927,6 +1921,10 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
                   scrollToPage(p)
                 }}
                 progress={readN / Math.max(1, book.pageCount)} />
+              {/* On a phone the reading time and its pause button sit here: the top bar has no room. */}
+              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
+                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="sm:hidden" />
+              )}
               {!mobile && (
                 <div className="ml-1 flex items-center rounded-full border border-hairline">
                   <IconButton label="Zoom out (Ctrl −)" size="icon-sm" onClick={() => stepZoom(-1)}>

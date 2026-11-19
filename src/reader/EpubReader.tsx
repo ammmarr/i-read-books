@@ -13,7 +13,6 @@ import { useToast } from '../components/ui/Toast'
 import { dailyGoal, updateSettings, useSettings, type PageTheme } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
 import { useIsTouch, vibrate } from '../lib/hooks'
-import { formatDuration } from '../lib/format'
 import { CHARS_PER_LOC } from '../lib/epub'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { noteOwnPosition, syncNow } from '../lib/sync'
@@ -23,6 +22,7 @@ import { noteText, openXPost, xPostText } from '../lib/share'
 import { SubstackNoteSheet } from '../components/ShareQuote'
 import { useReadingSession } from './useReadingSession'
 import { StillReading } from './StillReading'
+import { ReadingClock } from './ReadingClock'
 import { HL_COLORS, HighlightPopover, SelectionToolbar, type ShareTo } from './HighlightTools'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
@@ -504,7 +504,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
 
   // ── Reading time ────────────────────────────────────────────────────
   const goalMin = dailyGoal(settings)
-  const { sessionSeconds, idle, asking, away, stillHere, countAway, dismissAway } = useReadingSession({
+  const { sessionSeconds, asking, away, paused, stillHere, countAway, dismissAway, pause } = useReadingSession({
     bookId: book.id,
     currentPage: loc?.location.current ?? book.currentPage,
     enabled: ready,
@@ -1044,7 +1044,8 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   })
 
   // ── Screen and bars ─────────────────────────────────────────────────
-  const awayNow = !!away && !away.back
+  // Away (no answer to "Still reading?") or paused with the button: the screen may sleep.
+  const awayNow = (!!away && !away.back) || paused
   useEffect(() => {
     if (!settings.keepAwake || awayNow) return
     if (isNative) {
@@ -1142,10 +1143,8 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
                   {minutesLeft >= 1 && <span className="hidden sm:inline"> · {minutesLeft} min left in chapter</span>}
                 </div>
               </div>
-              {settings.showSessionTimer && sessionSeconds > 0 && (
-                <span className={`mr-1 hidden text-body-sm tabular sm:inline ${idle ? 'text-faint' : 'text-mute'}`} title={idle ? 'Paused' : 'Reading time this session'}>
-                  {formatDuration(sessionSeconds)}
-                </span>
+              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
+                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="max-sm:hidden" />
               )}
               <IconButton label={markedHere ? 'Remove bookmark (B)' : 'Bookmark this page (B)'} tipBelow active={!!markedHere} onClick={() => void toggleBookmark()}>
                 <BookmarkIcon className={`size-[18px] ${markedHere ? 'fill-link text-link' : ''}`} />
@@ -1232,6 +1231,10 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
                 <ChevronRight className="size-4" />
               </IconButton>
               <GoToPage page={here} count={total} onGo={goToPage} progress={readN / Math.max(1, total)} />
+              {/* On a phone the reading time and its pause button sit here: the top bar has no room. */}
+              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
+                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="sm:hidden" />
+              )}
               {!touch && (
                 <div className="ml-1 hidden items-center rounded-full border border-hairline sm:flex">
                   <IconButton label="Smaller text (Ctrl −)" size="icon-sm" onClick={() => zoom(-1)}>

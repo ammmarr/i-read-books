@@ -10,13 +10,11 @@ const DEFAULT_PAGE_S = 90
 const MIN_SESSION_S = 10
 const FLUSH_EVERY_S = 10
 /**
- * Nothing moving — same page, same spot, no touch, key or mouse — for three
- * times the page's reading time (within these bounds) asks "Still reading?",
- * so a book left open doesn't go on counting.
+ * Nothing moving — same page, same spot, no touch, key, mouse or scroll — for
+ * a minute asks "Still reading?", so a book left open doesn't go on counting.
  */
-const ASK_MIN_S = 3 * 60
-const ASK_MAX_S = 12 * 60
-/** No answer within this → away: the clock stops and the still time comes off. */
+const ASK_AFTER_S = 60
+/** No answer within this (two minutes still in all) → away: the clock stops and the still time comes off. */
 const ANSWER_S = 60
 /** How long "Welcome back" (with "I was reading") stays up. */
 const BACK_NOTE_MS = 12_000
@@ -53,9 +51,13 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
   /** Seconds left to answer "Still reading?" (null when not asking). */
   const [asking, setAsking] = useState<number | null>(null)
   const [away, setAway] = useState<Away | null>(null)
+  /** Paused with the pause button (moving through the book starts it again). */
+  const [paused, setPaused] = useState(false)
   const state = useRef({
     session: null as Session | null,
     lastActivity: Date.now(),
+    /** When you pressed pause (0 when not paused that way). */
+    pausedAt: 0,
     /** Seconds counted since the last sign of you (input or moving through the book). */
     stillCounted: 0,
     /** Set while away: where the time came off, to put it back. */
@@ -78,7 +80,7 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
   pageSecsRef.current = pageSeconds
   const readCb = useRef(onPageRead)
   readCb.current = onPageRead
-  const api = useRef({ here: () => {}, countAway: () => {} })
+  const api = useRef({ here: () => {}, countAway: () => {}, pause: () => {} })
 
   // Seconds already read today (other sessions, Substack too), to detect crossing the goal.
   useEffect(() => {
@@ -135,6 +137,10 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
       if (st.session && now - st.lastActivity > SPLIT_MS) void end()
       st.lastActivity = now
       st.stillCounted = 0
+      if (st.pausedAt) {
+        st.pausedAt = 0
+        setPaused(false)
+      }
       setIdle(false)
       setAsking(null)
       if (st.away) {
@@ -148,6 +154,18 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
           setAway(null)
         }, BACK_NOTE_MS)
       }
+    }
+
+    // The pause button. Everything up to now counts (you were here to press it); nothing more until you move.
+    const pause = () => {
+      if (st.pausedAt) return
+      st.pausedAt = Date.now()
+      st.lastActivity = st.pausedAt
+      st.stillCounted = 0
+      setAsking(null)
+      setIdle(true)
+      setPaused(true)
+      void flush()
     }
 
     // No answer: the still time beyond what the page takes to read comes off.
@@ -171,11 +189,10 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
 
     const tick = () => {
       const now = Date.now()
-      if (st.away || document.visibilityState !== 'visible') return setIdle(true)
+      if (st.pausedAt || st.away || document.visibilityState !== 'visible') return setIdle(true)
       const still = (now - st.lastActivity) / 1000
-      const askAfter = Math.max(ASK_MIN_S, Math.min(ASK_MAX_S, 3 * pageSecs()))
-      if (still >= askAfter + ANSWER_S) return goAway()
-      setAsking(still >= askAfter ? Math.ceil(askAfter + ANSWER_S - still) : null)
+      if (still >= ASK_AFTER_S + ANSWER_S) return goAway()
+      setAsking(still >= ASK_AFTER_S ? Math.ceil(ASK_AFTER_S + ANSWER_S - still) : null)
       setIdle(false)
       if (!st.session) {
         st.session = { id: uid(), bookId, start: now, end: now, seconds: 0, pages: [] }
@@ -206,6 +223,7 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
 
     api.current = {
       here: activity,
+      pause,
       // "I was reading": put the time back.
       countAway: () => {
         const a = st.lastAway ?? st.away
@@ -229,6 +247,14 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
     const events = ['pointerdown', 'pointermove', 'wheel', 'keydown', 'touchstart', 'scroll'] as const
     let lastMove = 0
     const onEvent = (e: Event) => {
+      // Pressing the clock pauses or starts it; that press isn't "moving".
+      if (e.target instanceof Element && e.target.closest('[data-reading-clock]')) return
+      if (st.pausedAt) {
+        // Paused with the button: scrolling, turning a page, a key or a tap starts it again — not a mouse
+        // drifting over the page, nor the tail end of the press that paused it.
+        if (e.type === 'pointermove' || Date.now() - st.pausedAt < 600) return
+        return activity()
+      }
       if (e.type === 'pointermove') {
         // The browser sends mouse moves while the page changes under a still
         // mouse (scrolling, the timer ticking) — those aren't you.
@@ -244,7 +270,8 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
     events.forEach((ev) => window.addEventListener(ev, onEvent, { passive: true, capture: true }))
     const onVisibility = () => {
       if (document.visibilityState === 'hidden') void flush()
-      else activity()
+      // Coming back to the app isn't moving in the book: paused stays paused.
+      else if (!st.pausedAt) activity()
     }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pagehide', flush)
@@ -266,6 +293,8 @@ export function useReadingSession({ bookId, currentPage, enabled, onGoalReached,
   /** "I was reading": count the time that came off after all. */
   const countAway = useCallback(() => api.current.countAway(), [])
   const dismissAway = useCallback(() => setAway(null), [])
+  /** The pause button. */
+  const pause = useCallback(() => api.current.pause(), [])
 
-  return { sessionSeconds, idle, asking, away, stillHere, countAway, dismissAway }
+  return { sessionSeconds, idle, asking, away, paused, stillHere, countAway, dismissAway, pause }
 }
