@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Trophy, Type,
+  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, TextAlignStart, Plus, Search, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
@@ -44,6 +44,7 @@ import { RecapPromptCard } from '../components/recap/RecapPrompt'
 import { StillReading } from './StillReading'
 import { ReadingClock } from './ReadingClock'
 import { EpubReader } from './EpubReader'
+import { ReflowReader } from './ReflowReader'
 import { isEpubBook, openEpub } from '../lib/epub'
 import type { FoliateBook } from 'foliate-js/view.js'
 
@@ -85,6 +86,16 @@ export default function Reader() {
   const [error, setError] = useState<string | null>(null)
   const [download, setDownload] = useState<number | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const [reflow, setReflow] = useState(() => wantsReflow(id) && !openAt)
+  const setReflowFor = (bookId: string, on: boolean) => {
+    try {
+      if (on) localStorage.removeItem(reflowKey(bookId))
+      else localStorage.setItem(reflowKey(bookId), '1')
+    } catch {
+      /* ignore */
+    }
+    setReflow(on)
+  }
   const [detail, setDetail] = useState<string | null>(null)
   // Before opening, give sync a moment to bring in where you left off on
   // another device — so the book opens there, not at this device's older spot.
@@ -210,7 +221,22 @@ export default function Reader() {
   const opened = doc ?? ebook
   if (!book || !opened || !fresh) return <ReaderLoading book={book} onBack={() => navigate('/')} progress={download} checking={!!book && !!opened && !fresh} />
   if (ebook) return <EpubReader key={book.id} book={book} ebook={ebook} openAt={openAt} />
-  return <ReaderView key={book.id} book={book} doc={doc!} openAt={openAt} />
+  if (reflow) return <ReflowReader key={book.id} book={book} doc={doc!} onExit={() => setReflowFor(book.id, false)} />
+  return <ReaderView key={book.id} book={book} doc={doc!} openAt={openAt} onReflow={() => setReflowFor(book.id, true)} />
+}
+
+/**
+ * Reading view (the PDF's text set again, at your size and spacing) is how every PDF opens, and
+ * stays that way until you switch to the PDF's own pages — then that's remembered, for all books.
+ */
+const REFLOW_KEY = 'irb-reflow-off'
+const reflowKey = (_id: string) => REFLOW_KEY
+function wantsReflow(_id: string | undefined) {
+  try {
+    return localStorage.getItem(REFLOW_KEY) !== '1'
+  } catch {
+    return true
+  }
 }
 
 function ReaderLoading({ book, onBack, progress, checking }: { book?: Book; onBack: () => void; progress?: number | null; checking?: boolean }) {
@@ -291,7 +317,7 @@ function ReaderMessage({
   )
 }
 
-function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; openAt?: OpenAt }) {
+function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocumentProxy; openAt?: OpenAt; onReflow: () => void }) {
   const navigate = useNavigate()
   const { toast } = useToast()
   const settings = useSettings()
@@ -1845,6 +1871,9 @@ function ReaderView({ book, doc, openAt }: { book: Book; doc: PDFDocumentProxy; 
                 <motion.span key={String(bookmarked)} initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 600, damping: 18 }} className="grid">
                   <BookmarkIcon className={`size-[18px] ${bookmarked ? 'fill-link text-link' : ''}`} />
                 </motion.span>
+              </IconButton>
+              <IconButton label="Reading view: text at your own size, filling the screen" tipBelow onClick={onReflow}>
+                <TextAlignStart className="size-[18px]" />
               </IconButton>
               <IconButton label="Display" tipBelow onClick={() => setSettingsOpen(true)}>
                 <Type className="size-[18px]" />

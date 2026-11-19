@@ -18,6 +18,10 @@ your own Supabase project.
 - **Reader** — continuous scroll, crisp high-DPI rendering, pages load on demand
   (fine for 1,000-page books). Resumes exactly where you left off.
   - Zoom: pinch, double-tap, Ctrl + scroll, Ctrl +/−, fit width / fit page.
+  - **Reading view** is how every PDF opens: its text is set again as a clean column that fills the
+    screen, so cramped small-print books are readable. Size, line spacing, line length (up to
+    *Fill screen*), typeface and page colour are in the **Aa** menu; pinch or Ctrl + scroll zooms
+    the text. The page icon (or Esc) shows the PDF's own pages instead, for every book.
   - Page colour: Auto / Paper / Sepia / Night (independent of the app theme).
   - Controls hide while you read; scroll up or tap to bring them back.
   - Table of contents, bookmarks, page scrubber with chapter preview, go-to-page.
