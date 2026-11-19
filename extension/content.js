@@ -79,10 +79,10 @@
   // ── Counting, the way the app does ─────────────────────────────────────────
   // The clock runs while the page is in front of you. Sitting still is reading for as long as the text
   // on screen takes to read; still time past that is held back (not sent) until you show you're there.
-  // Still for three times that (3 to 12 min) asks "Still reading?" (annotate.js shows it); no answer
-  // within a minute and the reading pauses: the held time comes off, and "I was reading" puts it back.
-  const ASK_MIN_S = 3 * 60
-  const ASK_MAX_S = 12 * 60
+  // Still for a minute asks "Still reading?" (annotate.js shows it); no answer within another minute
+  // and the reading pauses: the held time comes off, and "I was reading" puts it back. The pill's pause
+  // button pauses it at once; moving through the page starts it again. Same timings as the app.
+  const ASK_AFTER_S = 60
   const ANSWER_S = 60
   /** How long "Welcome back" (with "I was reading") stays up. */
   const BACK_NOTE_MS = 12_000
@@ -119,6 +119,8 @@
   /** Paused: { off: seconds taken off, back: you're back, visit: where they came off }. */
   let away = null
   let backT
+  /** When you pressed the pill's pause button (0 when not paused that way). */
+  let pausedAt = 0
 
   const listeners = new Set()
   const emit = () => listeners.forEach((l) => l())
@@ -128,6 +130,10 @@
   function activity() {
     lastActivity = Date.now()
     still = 0
+    if (pausedAt) {
+      pausedAt = 0
+      emit()
+    }
     if (asking != null) {
       asking = null
       emit()
@@ -142,9 +148,28 @@
       emit()
     }
   }
-  for (const ev of ['scroll', 'wheel', 'keydown', 'pointerdown', 'touchstart', 'focus']) addEventListener(ev, activity, { passive: true, capture: true })
+  function onInput(e) {
+    // Pressing the pill's pause button pauses or starts it; that press isn't "moving".
+    if (e.composedPath?.().some((n) => n?.dataset?.irbClock !== undefined)) return
+    // Paused with the button: scrolling, a key or a click on the page starts it again — not a mouse
+    // drifting over the page, the window getting focus back, or the tail end of the press that paused it.
+    if (pausedAt && (e.type === 'pointermove' || e.type === 'focus' || Date.now() - pausedAt < 600)) return
+    activity()
+  }
+  for (const ev of ['scroll', 'wheel', 'keydown', 'pointerdown', 'touchstart', 'focus']) addEventListener(ev, onInput, { passive: true, capture: true })
   // The browser also sends mouse moves while the page changes under a still mouse — those aren't you.
-  addEventListener('pointermove', (e) => (e.movementX || e.movementY) && activity(), { passive: true, capture: true })
+  addEventListener('pointermove', (e) => (e.movementX || e.movementY) && onInput(e), { passive: true, capture: true })
+
+  /** The pill's pause button. What's counted so far stays (you were there to press it); nothing more until you move. */
+  function pause() {
+    if (pausedAt) return
+    pausedAt = Date.now()
+    lastActivity = pausedAt
+    still = 0
+    asking = null
+    report()
+    emit()
+  }
 
   // No answer: the still time beyond what the screen takes to read comes off.
   function goAway() {
@@ -176,9 +201,11 @@
 
   // For annotate.js, which shows "Still reading?" and "Reading time paused" on the page.
   globalThis.__irbReading = {
-    state: () => ({ asking, away: away && { off: away.off, back: away.back } }),
+    state: () => ({ asking, away: away && { off: away.off, back: away.back }, paused: !!pausedAt }),
     subscribe: (l) => listeners.add(l),
     stillHere: activity,
+    pause,
+    resume: activity,
     countAway,
     dismiss: () => {
       clearTimeout(backT)
@@ -231,20 +258,21 @@
       }
       still = 0
       sinceReport = 0
-      if (asking != null || away) {
+      if (asking != null || away || pausedAt) {
         asking = null
         away = null
+        pausedAt = 0
         emit()
       }
       return
     }
     if (away && !away.back) return // paused until you're back
+    if (pausedAt) return // paused with the button until you move
     if (document.visibilityState !== 'visible' || !document.hasFocus()) return
     const now = Date.now()
     const stillFor = (now - lastActivity) / 1000
-    const askAfter = Math.max(ASK_MIN_S, Math.min(ASK_MAX_S, 3 * screenSecs()))
-    if (stillFor >= askAfter + ANSWER_S) return goAway()
-    const left = stillFor >= askAfter ? Math.ceil(askAfter + ANSWER_S - stillFor) : null
+    if (stillFor >= ASK_AFTER_S + ANSWER_S) return goAway()
+    const left = stillFor >= ASK_AFTER_S ? Math.ceil(ASK_AFTER_S + ANSWER_S - stillFor) : null
     if (left !== asking) {
       asking = left
       emit()
@@ -262,7 +290,8 @@
     }
   }, 1000)
 
-  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? report() : activity()))
+  // Coming back to the tab isn't moving on the page: paused with the button stays paused.
+  document.addEventListener('visibilitychange', () => (document.visibilityState === 'hidden' ? report() : !pausedAt && activity()))
   addEventListener('pagehide', () => report())
   addEventListener('blur', () => report())
 })()

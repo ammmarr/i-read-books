@@ -354,6 +354,17 @@
     .still .x:hover { background: var(--soft); color: var(--ink); }
     .pill.asking .s { color: #7cb8ff; }
     .pill.paused .ring { opacity: .45; }
+    .pill.paused .s { color: #fbbf24; }
+    /* The pause button, as in the app's reader: pause at once; scrolling or a key starts it again. */
+    .pz { width: 24px; height: 24px; margin-left: 2px; border-radius: 999px; display: grid; place-items: center; background: rgba(255,255,255,.1); color: #fff; flex: none;
+      transition: background-color .15s ease, transform .12s ease; }
+    .pz:hover { background: rgba(255,255,255,.2); }
+    .pz:active { transform: scale(.92); }
+    .pz:focus-visible { outline: 2px solid #3291ff; outline-offset: 2px; }
+    .pz .play { display: none; }
+    .pill.paused .pz { background: rgba(251,191,36,.2); color: #fbbf24; }
+    .pill.paused .pz .play { display: block; }
+    .pill.paused .pz .pause { display: none; }
     .state { margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: var(--soft); color: var(--body); font-size: 12px; }
     [hidden] { display: none !important; }
     svg { display: block; }
@@ -367,6 +378,7 @@
   <div class="pill" part="pill" tabindex="0" aria-label="I read on this page">
     <svg class="ring" viewBox="0 0 26 26"><circle cx="13" cy="13" r="10.5" fill="none" stroke="rgba(255,255,255,.18)" stroke-width="3"/><circle class="arc" cx="13" cy="13" r="10.5" fill="none" stroke="#ff6719" stroke-width="3" stroke-linecap="round" transform="rotate(-90 13 13)" stroke-dasharray="0 66"/></svg>
     <span class="t">0 min</span><span class="s">this article</span>
+    <button class="pz" data-k="pause" data-irb-clock aria-label="Pause reading time"><svg class="pause" width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><rect x="1.5" y="1" width="2.4" height="8" rx=".8"/><rect x="6.1" y="1" width="2.4" height="8" rx=".8"/></svg><svg class="play" width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M2.5 1.3v7.4a.6.6 0 0 0 .9.5l5.8-3.7a.6.6 0 0 0 0-1L3.4.8a.6.6 0 0 0-.9.5z"/></svg></button>
     <span class="mode"><i></i>Highlighting</span>
     <span class="nosync" title="Not signed in: this time isn’t reaching I read">Not syncing</span>
   </div>
@@ -418,8 +430,8 @@
   function renderPill() {
     const goal = status.goal || 0
     const frac = goal ? Math.min(1, status.todaySecs / (goal * 60)) : 0
-    const { asking, away } = R?.state() ?? {}
-    const paused = !!away && !away.back
+    const { asking, away, paused: byButton } = R?.state() ?? {}
+    const paused = (!!away && !away.back) || !!byButton
     ui.querySelector('.arc').setAttribute('stroke-dasharray', `${(frac * 66).toFixed(1)} 66`)
     ui.querySelector('.arc').setAttribute('stroke', goal && status.todaySecs >= goal * 60 ? '#22c55e' : '#ff6719')
     pill.querySelector('.t').textContent = `${mins(status.articleSecs)} min`
@@ -427,7 +439,12 @@
     pill.classList.toggle('paused', paused)
     pill.classList.toggle('asking', !paused && asking != null)
     $('state').hidden = !paused
-    $('state').textContent = 'Reading time paused. It runs again when you scroll or move the mouse.'
+    $('state').textContent = byButton
+      ? 'Reading time paused. It starts again when you scroll or press a key, or with ▶ on the pill.'
+      : 'Reading time paused. It runs again when you scroll or move the mouse.'
+    $('pause').hidden = !R
+    $('pause').setAttribute('aria-label', paused ? 'Start reading time again' : 'Pause reading time')
+    $('pause').title = paused ? 'Start reading time again' : 'Pause reading time'
     pill.classList.toggle('on', mode)
     $('article').textContent = String(mins(status.articleSecs))
     $('today').textContent = goal ? `${mins(status.todaySecs)} of ${goal} min` : `${mins(status.todaySecs)} min`
@@ -571,6 +588,14 @@
     $('stillx').hidden = !away?.back
   }
   $('stillbtn').addEventListener('click', () => (R?.state().away ? R.countAway() : R?.stillHere()))
+  // The pill's pause button (the pill itself opens the panel, so the press stops here).
+  $('pause').addEventListener('click', (e) => {
+    e.stopPropagation()
+    const s = R?.state()
+    if (!s) return
+    if (s.paused || (s.away && !s.away.back)) (R.resume ?? R.stillHere)()
+    else R.pause?.()
+  })
   $('stillx').addEventListener('click', () => R?.dismiss())
   R?.subscribe(renderStill)
 
