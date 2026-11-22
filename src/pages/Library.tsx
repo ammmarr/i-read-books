@@ -2,11 +2,10 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDownUp, BookOpen, ChevronsRight, FilePlus, Flame, Globe, Plus, Search, X } from 'lucide-react'
-import { unreadAhead } from '../lib/pages'
-import { continueFrom } from '../lib/openBook'
+import { ArrowDownUp, BookOpen, FilePlus, Globe, Plus, Search, X } from 'lucide-react'
 import { SubstackContinueCard, SubstackShelf } from './LibrarySubstack'
-import { db, type Book, type BookStatus, type Session, type WebRead } from '../db/db'
+import { ContinueCard, Shelf, TodayCard, type Arrange } from './LibraryShelf'
+import { db, type Book, type BookStatus } from '../db/db'
 import { bookProgress } from '../db/books'
 import { PageContainer } from '../components/AppShell'
 import { BookCover } from '../components/BookCover'
@@ -16,16 +15,17 @@ import { Button } from '../components/ui/Button'
 import { Menu } from '../components/ui/Menu'
 import { ProgressBar } from '../components/ui/Progress'
 import { Segmented } from '../components/ui/Segmented'
-import { dailyGoal, useSettings } from '../lib/settings'
-import { useWebReads, webSessions, webToday } from '../lib/web'
-import { bookStats, dailyTotals, streaks, summarize, todaySeconds } from '../lib/stats'
-import { formatDurationLong, greeting, pluralize } from '../lib/format'
+import { useWebReads } from '../lib/web'
+import { greeting, pluralize } from '../lib/format'
 import { useIsTouch } from '../lib/hooks'
 import { useAuth } from '../lib/supabase'
 
 type Filter = 'all' | BookStatus
 type View = 'books' | 'substack'
 type Sort = 'recent' | 'added' | 'title' | 'progress'
+/** The shelf of spines (by shelf or by colour), or the covers grid it replaced. */
+type Layout = Arrange | 'covers'
+const LAYOUTS: Layout[] = ['shelf', 'colour', 'covers']
 
 const SORTS: { key: Sort; label: string }[] = [
   { key: 'recent', label: 'Recently read' },
@@ -59,6 +59,22 @@ export default function Library() {
   const [filter, setFilter] = useState<Filter>('all')
   const [sort, setSort] = useState<Sort>(() => (localStorage.getItem('irb-sort') as Sort) || 'recent')
   const [query, setQuery] = useState('')
+  const [layout, setLayoutState] = useState<Layout>(() => {
+    try {
+      const v = localStorage.getItem('irb-library-arrange') as Layout
+      return LAYOUTS.includes(v) ? v : 'shelf'
+    } catch {
+      return 'shelf'
+    }
+  })
+  const setLayout = (v: Layout) => {
+    setLayoutState(v)
+    try {
+      localStorage.setItem('irb-library-arrange', v)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const current = useMemo(
     () =>
@@ -83,6 +99,9 @@ export default function Library() {
         }
       })
   }, [books, filter, sort, query])
+  // The book taken off the shelf: your pick while it's still there; otherwise the one you're reading, else the first.
+  const [picked, setSelected] = useState<string | null>(null)
+  const selected = picked && books?.some((b) => b.id === picked) ? picked : (current?.id ?? books?.[0]?.id ?? null)
 
   if (!books || !reads) return <LibrarySkeleton />
   if (books.length === 0 && reads.length === 0) return <EmptyLibrary onAdd={pick} />
@@ -126,8 +145,22 @@ export default function Library() {
       <>
 
       <div className="mt-10 flex flex-wrap items-center gap-3">
-        <h2 className="mr-auto text-heading-md text-ink">Your shelf</h2>
-        <div className="relative order-last w-full sm:order-none sm:w-56">
+        <h2 className="text-heading-md text-ink">Your shelf</h2>
+        <div className="-mx-4 order-last w-full overflow-x-auto px-4 pb-1 sm:order-none sm:mx-0 sm:w-auto sm:px-0 sm:pb-0">
+          <Segmented
+            size="sm"
+            value={filter}
+            onChange={setFilter}
+            ariaLabel="Filter books"
+            options={[
+              { value: 'all', label: <>All <Count n={books.length} /></> },
+              { value: 'reading', label: <>Reading <Count n={count('reading')} /></> },
+              { value: 'queued', label: <>Up next <Count n={count('queued')} /></> },
+              { value: 'finished', label: <>Finished <Count n={count('finished')} /></> },
+            ]}
+          />
+        </div>
+        <div className="relative ml-auto w-40 sm:w-52">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-faint" />
           <input
             value={query}
@@ -141,52 +174,56 @@ export default function Library() {
             </button>
           )}
         </div>
-        <Menu
-          label="Sort by"
-          items={SORTS.map((s) => ({
-            label: s.label,
-            checked: sort === s.key,
-            onSelect: () => {
-              setSort(s.key)
-              try { localStorage.setItem('irb-sort', s.key) } catch { /* ignore */ }
-            },
-          }))}
-          trigger={(p) => (
-            <Button {...p} variant="outline" size="md" className="px-3">
-              <ArrowDownUp className="size-4 text-body" />
-              <span className="hidden sm:inline">{SORTS.find((s) => s.key === sort)?.label}</span>
-            </Button>
-          )}
-        />
-      </div>
-
-      <div className="mt-4 -mx-4 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-        <Segmented
-          value={filter}
-          onChange={setFilter}
-          ariaLabel="Filter books"
+        {layout === 'covers' && (
+          <Menu
+            label="Sort by"
+            items={SORTS.map((s) => ({
+              label: s.label,
+              checked: sort === s.key,
+              onSelect: () => {
+                setSort(s.key)
+                try { localStorage.setItem('irb-sort', s.key) } catch { /* ignore */ }
+              },
+            }))}
+            trigger={(p) => (
+              <Button {...p} variant="outline" size="md" className="px-3">
+                <ArrowDownUp className="size-4 text-body" />
+                <span className="hidden sm:inline">{SORTS.find((s) => s.key === sort)?.label}</span>
+              </Button>
+            )}
+          />
+        )}
+        <Segmented<Layout>
+          size="sm"
+          value={layout}
+          onChange={setLayout}
+          ariaLabel="Arrange your books"
           options={[
-            { value: 'all', label: <>All <Count n={books.length} /></> },
-            { value: 'reading', label: <>Reading <Count n={count('reading')} /></> },
-            { value: 'queued', label: <>Up next <Count n={count('queued')} /></> },
-            { value: 'finished', label: <>Finished <Count n={count('finished')} /></> },
+            { value: 'shelf', label: 'Shelf', title: 'Reading and up next, then finished' },
+            { value: 'colour', label: 'Colour', title: 'Every book by the colour of its spine' },
+            { value: 'covers', label: 'Covers', title: 'Covers in a grid, sorted as you like' },
           ]}
         />
       </div>
 
-      <motion.div layout className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 md:gap-x-6">
-        <AnimatePresence mode="popLayout" initial={false}>
-          {visible.map((b, i) => (
-            <BookCard key={b.id} book={b} index={i} />
-          ))}
-        </AnimatePresence>
-      </motion.div>
-
-      {visible.length === 0 && (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-16 text-center">
-          <p className="text-label-sm text-ink">{query ? `No books match “${query}”` : 'Nothing here yet'}</p>
-          <p className="mt-1 text-body-md text-mute">{query ? 'Try a different title or author.' : 'Books you move to this shelf will show up here.'}</p>
-        </motion.div>
+      {layout === 'covers' ? (
+        <>
+          <motion.div layout className="mt-6 grid grid-cols-2 gap-x-4 gap-y-8 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 md:gap-x-6">
+            <AnimatePresence mode="popLayout" initial={false}>
+              {visible.map((b, i) => (
+                <BookCard key={b.id} book={b} index={i} />
+              ))}
+            </AnimatePresence>
+          </motion.div>
+          {visible.length === 0 && (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="py-16 text-center">
+              <p className="text-label-sm text-ink">{query ? `No books match “${query}”` : 'Nothing here yet'}</p>
+              <p className="mt-1 text-body-md text-mute">{query ? 'Try a different title or author.' : 'Books you move to this shelf will show up here.'}</p>
+            </motion.div>
+          )}
+        </>
+      ) : (
+        <Shelf books={books} sessions={sessions ?? []} filter={filter} query={query} arrange={layout} selected={selected} onSelect={setSelected} />
       )}
       </>
       )}
@@ -245,69 +282,6 @@ function BookCard({ book, index }: { book: Book; index: number }) {
   )
 }
 
-function ContinueCard({ book, sessions }: { book: Book; sessions: Session[] }) {
-  const navigate = useNavigate()
-  const overall = summarize(sessions, 0, Infinity).pagesPerHour
-  const stats = bookStats(book, sessions, overall)
-  const progress = bookProgress(book)
-  const unread = unreadAhead(book)
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-      className="relative flex gap-5 overflow-hidden rounded-md border border-hairline bg-canvas-elevated p-4 sm:gap-6 sm:p-6"
-    >
-      {/* the cover's own colour, whispered into the card */}
-      <div
-        className="pointer-events-none absolute -left-16 -top-16 size-64 rounded-full opacity-[0.14] blur-3xl dark:opacity-[0.12]"
-        style={{ background: book.tint }}
-      />
-      <motion.button
-        whileHover={{ rotate: -1.5, y: -3 }}
-        whileTap={{ scale: 0.97 }}
-        onClick={() => navigate(`/read/${book.id}`)}
-        className="relative w-[84px] shrink-0 self-start rounded-[4px] shadow-cover-lift sm:w-[112px]"
-        aria-label={`Resume ${book.title}`}
-      >
-        <BookCover book={book} />
-      </motion.button>
-      <div className="relative flex min-w-0 flex-1 flex-col">
-        <div className="text-mono-eyebrow text-mute">Continue reading</div>
-        <h2 className="mt-2 line-clamp-2 text-heading-md text-ink">{book.title}</h2>
-        {book.author && <p className="mt-0.5 truncate text-body-md text-body">{book.author}</p>}
-        <div className="mt-auto pt-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3 text-body-sm">
-            <span className="text-ink">
-              <span className="font-medium">{Math.round(progress * 100)}%</span>
-              <span className="text-mute"> · page {book.currentPage + 1} of {book.pageCount}</span>
-            </span>
-            {stats.remainingSeconds != null && stats.remainingSeconds > 0 && (
-              <span className="hidden text-mute sm:inline">~{formatDurationLong(stats.remainingSeconds)} left</span>
-            )}
-          </div>
-          <ProgressBar value={progress} />
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Button onClick={() => navigate(`/read/${book.id}`)} size="md">
-              <BookOpen className="size-4" />
-              Resume
-            </Button>
-            {unread != null && (
-              <Button variant="outline" size="md" onClick={() => continueFrom(navigate, book.id, unread)} title="The first page you haven’t read yet">
-                <ChevronsRight className="size-4" />
-                Continue from p. {unread + 1}
-              </Button>
-            )}
-            <Button variant="ghost" onClick={() => navigate(`/book/${book.id}`)} className="hidden sm:inline-flex">
-              Details
-            </Button>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  )
-}
-
 function PickSomething({ books }: { books: Book[] }) {
   const navigate = useNavigate()
   const readable = books.filter((b) => b.pageCount > 0)
@@ -325,67 +299,6 @@ function PickSomething({ books }: { books: Book[] }) {
           <BookOpen className="size-4" /> Start reading
         </Button>
       </div>
-    </div>
-  )
-}
-
-/** Today against your daily goal: all your reading, one number. */
-function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
-  const goalMin = dailyGoal(useSettings())
-  const total = todaySeconds(sessions) + webToday(reads)
-  const goal = goalMin * 60
-  const met = goal > 0 && total >= goal
-  // Any reading keeps the streak going.
-  const s = streaks(dailyTotals([...sessions, ...webSessions(reads)]))
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}
-    >
-      <Link to="/stats" className="flex h-full items-center gap-5 rounded-md border border-hairline bg-canvas-elevated p-5 transition-colors hover:border-faint/40 sm:p-6 lg:flex-col lg:items-start lg:justify-between">
-        <GoalRing value={goal ? total / goal : 0} met={met}>
-          <div className="text-center leading-none">
-            <div className={`text-[20px] font-semibold tracking-tight ${met ? 'text-success' : 'text-ink'}`}>{Math.floor(total / 60)}</div>
-            <div className="mt-1 text-[11px] text-mute">of {goalMin}m</div>
-          </div>
-        </GoalRing>
-        <div className="min-w-0 flex-1 lg:w-full lg:flex-none">
-          <div className="text-mono-eyebrow text-mute">Today</div>
-          <p className="mt-2 text-label-sm text-ink">
-            {met ? 'Daily goal reached — nice.' : total > 0 ? `${Math.max(1, Math.ceil((goal - total) / 60))} min to your goal` : 'No reading yet today'}
-          </p>
-          <p className="mt-3 flex items-center gap-1.5 text-body-sm text-mute">
-            <Flame className={`size-3.5 ${s.readToday ? 'text-warning' : 'text-faint'}`} />
-            {s.current > 0 ? `${s.current}-day streak` : 'Start a streak today'}
-            {s.longest > s.current && ` · best ${s.longest}`}
-          </p>
-        </div>
-      </Link>
-    </motion.div>
-  )
-}
-
-/** The daily goal as a ring. */
-function GoalRing({ value, met, children }: { value: number; met: boolean; children: React.ReactNode }) {
-  const size = 88, stroke = 6
-  const r = (size - stroke) / 2
-  const c = 2 * Math.PI * r
-  const v = Math.min(1, Math.max(0, value))
-  return (
-    <div className="relative grid shrink-0 place-items-center" style={{ width: size, height: size }} role="img" aria-label={`Daily goal: ${Math.round(v * 100)}%`}>
-      <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-hairline)" strokeWidth={stroke} />
-        {v > 0 && (
-          <motion.circle
-            cx={size / 2} cy={size / 2} r={r} fill="none" stroke={met ? 'var(--color-success)' : 'var(--color-link)'} strokeWidth={stroke} strokeLinecap="round"
-            initial={{ strokeDasharray: `0 ${c}` }}
-            animate={{ strokeDasharray: `${v * c} ${c}` }}
-            transition={{ duration: 0.9, ease: [0.16, 1, 0.3, 1] }}
-          />
-        )}
-      </svg>
-      <div className="absolute inset-0 grid place-items-center">{children}</div>
     </div>
   )
 }
