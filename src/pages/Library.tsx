@@ -2,10 +2,9 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDownUp, BookOpen, ChevronsRight, FilePlus, Flame, Plus, Search, X } from 'lucide-react'
+import { ArrowDownUp, BookOpen, ChevronsRight, FilePlus, Flame, Globe, Plus, Search, X } from 'lucide-react'
 import { unreadAhead } from '../lib/pages'
 import { continueFrom } from '../lib/openBook'
-import { SubstackMark } from '../components/ShareQuote'
 import { SubstackContinueCard, SubstackShelf } from './LibrarySubstack'
 import { db, type Book, type BookStatus, type Session, type WebRead } from '../db/db'
 import { bookProgress } from '../db/books'
@@ -101,10 +100,11 @@ export default function Library() {
           size="sm"
           value={view}
           onChange={setView}
-          ariaLabel="Books or Substack"
+          ariaLabel="Books or the web"
           options={[
             { value: 'books', label: <span className="inline-flex items-center gap-1.5"><BookOpen className="size-3.5" /> Books</span> },
-            { value: 'substack', label: <span className="inline-flex items-center gap-1.5"><SubstackMark className="size-3 text-[var(--color-substack)]" /> Substack</span> },
+            // Substack, X articles and any page you turn on in the extension (the value stays 'substack' for saved choices).
+            { value: 'substack', label: <span className="inline-flex items-center gap-1.5"><Globe className="size-3.5" /> Web</span> },
           ]}
         />
       </div>

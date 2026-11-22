@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
-import { ArrowDownUp, ExternalLink, Highlighter, NotebookPen, Search, Trash2, X } from 'lucide-react'
+import { ArrowDownUp, ExternalLink, Globe, Highlighter, NotebookPen, Search, Trash2, X } from 'lucide-react'
 import { db, uid, type WebAnnotation, type WebRead } from '../db/db'
 import { Sheet } from '../components/ui/Sheet'
 import { swatchOf } from '../reader/HighlightTools'
@@ -93,17 +93,17 @@ export function SubstackContinueCard({ reads, onPick }: { reads: WebRead[]; onPi
   )
 }
 
-/** Nothing from Substack yet: how it gets here. */
+/** Nothing from the web yet: how it gets here. */
 function SubstackEmpty() {
   return (
     <div className="relative flex items-center gap-5 overflow-hidden rounded-md border border-dashed border-hairline bg-canvas-elevated p-6">
-      <span className="grid size-14 shrink-0 place-items-center rounded-[10px] text-white" style={{ background: 'var(--color-substack)' }}>
-        <SubstackMark className="size-6" />
+      <span className="grid size-14 shrink-0 place-items-center rounded-[10px] bg-ink text-canvas">
+        <Globe className="size-6" />
       </span>
       <div className="min-w-0">
-        <p className="text-heading-md text-ink">Your Substack reading lands here</p>
+        <p className="text-heading-md text-ink">Your reading on the web lands here</p>
         <p className="mt-1 text-body-md text-body">
-          The I read extension for Chrome counts the time you actively read on Substack (and on X articles, or any page you turn on) and shelves each article here.{' '}
+          The I read extension for Chrome counts the time you actively read on Substack, X articles and any page you turn on, and shelves each article here.{' '}
           <Link to="/settings" className="text-link hover:underline">
             Set it up in Settings
           </Link>
