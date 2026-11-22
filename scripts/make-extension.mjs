@@ -1,5 +1,5 @@
 // After a website build: pack the Chrome extension (extension/) into
-// dist/i-read-substack.zip, the download in Settings → Substack. Its
+// dist/i-read-extension.zip, the download in Settings → I read extension. Its
 // config.js points it at this app's Supabase project (public key only).
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
@@ -34,17 +34,17 @@ const walk = (dir) => {
     if (statSync(p).isDirectory()) walk(p)
     else {
       const rel = relative('extension', p).split('\\').join('/')
-      if (rel !== 'config.js') files[`i-read-substack/${rel}`] = readFileSync(p)
+      if (rel !== 'config.js') files[`i-read-extension/${rel}`] = readFileSync(p)
     }
   }
 }
 walk('extension')
-files['i-read-substack/config.js'] = strToU8(config)
+files['i-read-extension/config.js'] = strToU8(config)
 // The one site allowed to ask the extension to post (content.js checks it).
 const content = readFileSync('extension/content.js', 'utf8')
 if (!content.includes("'__APP_ORIGIN__'")) throw new Error('make-extension: content.js has no __APP_ORIGIN__ placeholder')
-files['i-read-substack/content.js'] = strToU8(content.replace("'__APP_ORIGIN__'", JSON.stringify(new URL(appUrl).origin)))
+files['i-read-extension/content.js'] = strToU8(content.replace("'__APP_ORIGIN__'", JSON.stringify(new URL(appUrl).origin)))
 
 mkdirSync('dist', { recursive: true })
-writeFileSync('dist/i-read-substack.zip', zipSync(files, { level: 6 }))
-console.log(`make-extension: dist/i-read-substack.zip (${Object.keys(files).length} files)`)
+writeFileSync('dist/i-read-extension.zip', zipSync(files, { level: 6 }))
+console.log(`make-extension: dist/i-read-extension.zip (${Object.keys(files).length} files)`)

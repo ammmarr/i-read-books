@@ -398,8 +398,8 @@ function refreshWarning() {
   if (missingColumns.size) parts.push('Your cloud database is older than this app, so a few details (like hand-edited progress) aren’t saved.')
   if (missingTables.has('irb_recaps')) parts.push('Chapter recaps aren’t syncing between your devices yet.')
   if (missingTables.has('irb_lookups')) parts.push('Looked-up words aren’t syncing between your devices yet.')
-  if (missingTables.has('irb_web_reads')) parts.push('Substack reading time from the Chrome extension can’t arrive yet.')
-  if (missingTables.has('irb_web_annotations')) parts.push('Substack highlights and notes from the Chrome extension can’t arrive yet.')
+  if (missingTables.has('irb_web_reads')) parts.push('Reading time from the I read extension can’t arrive yet.')
+  if (missingTables.has('irb_web_annotations')) parts.push('Highlights and notes from the I read extension can’t arrive yet.')
   set({ warning: parts.length ? `${parts.join(' ')} Run the latest supabase/schema.sql once to finish the update.` : null })
 }
 

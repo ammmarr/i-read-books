@@ -49,11 +49,11 @@ export default function SettingsPage() {
         </Group>
       )}
 
-      <Group title="Daily goal" desc="How long you want to read each day. All your reading counts, books and Substack alike. Your streak counts any day with at least a minute of reading.">
+      <Group title="Daily goal" desc="How long you want to read each day. All your reading counts, books and the web alike. Your streak counts any day with at least a minute of reading.">
         <DailyGoal />
       </Group>
 
-      <Group title="Substack" desc="A small Chrome extension counts the time you actively read on Substack and adds it here — toward your daily goal.">
+      <Group title="I read extension" desc="A small Chrome extension counts the time you actively read on the web — Substack, X articles and any page you turn it on for — and adds it here, toward your daily goal.">
         <SubstackSettings />
       </Group>
 

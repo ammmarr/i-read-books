@@ -1,4 +1,4 @@
-// I read — Substack time: keeps the reading the pages report (content.js),
+// The I read extension: keeps the reading the pages report (content.js),
 // shows today's minutes on the icon, and sends it to your I read account
 // (table irb_web_reads) — straight away when online, later when not.
 import { CONFIG } from './config.js'
@@ -42,7 +42,7 @@ async function updateBadge() {
   const mins = Math.floor((t.substack + t.books) / 60)
   await chrome.action.setBadgeText({ text: !auth ? '!' : mins ? String(mins) : '' })
   await chrome.action.setBadgeBackgroundColor({ color: !auth ? '#d97706' : mins >= goal ? '#16a34a' : '#0070f3' })
-  await chrome.action.setTitle({ title: !auth ? 'I read · sign in to count your reading on Substack and X' : `I read · ${mins} of ${goal} min read today` })
+  await chrome.action.setTitle({ title: !auth ? 'I read · sign in to count your reading on the web' : `I read · ${mins} of ${goal} min read today` })
 }
 
 // ── Pages report their reading ─────────────────────────────────────────────
@@ -166,7 +166,7 @@ async function doSync() {
       if (res && !res.ok) {
         const body = await res.json().catch(() => ({}))
         const missing = body.code === 'PGRST205' || res.status === 404
-        throw new Error(missing ? 'Your I read cloud needs one update before Substack time can sync (run the latest supabase/schema.sql). Nothing is lost — it’s kept here until then.' : body.message || `Couldn’t sync (${res.status})`)
+        throw new Error(missing ? 'Your I read cloud needs one update before reading time from the extension can sync (run the latest supabase/schema.sql). Nothing is lost — it’s kept here until then.' : body.message || `Couldn’t sync (${res.status})`)
       }
       // Done — unless a page reported more while this was on its way.
       await serial(async () => {
@@ -194,7 +194,7 @@ async function doSync() {
       if (res && !res.ok) {
         const body = await res.json().catch(() => ({}))
         const missing = body.code === 'PGRST205' || res.status === 404
-        throw new Error(missing ? 'Your I read cloud needs one update before Substack highlights can sync (run the latest supabase/schema.sql). They’re kept here until then.' : body.message || `Couldn’t sync highlights (${res.status})`)
+        throw new Error(missing ? 'Your I read cloud needs one update before highlights from the extension can sync (run the latest supabase/schema.sql). They’re kept here until then.' : body.message || `Couldn’t sync highlights (${res.status})`)
       }
       await serial(async () => {
         const { annPending: now = {} } = await get('annPending')

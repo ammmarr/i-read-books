@@ -103,7 +103,7 @@ function SubstackEmpty() {
       <div className="min-w-0">
         <p className="text-heading-md text-ink">Your Substack reading lands here</p>
         <p className="mt-1 text-body-md text-body">
-          The I read extension for Chrome counts the time you actively read on Substack and shelves each article here.{' '}
+          The I read extension for Chrome counts the time you actively read on Substack (and on X articles, or any page you turn on) and shelves each article here.{' '}
           <Link to="/settings" className="text-link hover:underline">
             Set it up in Settings
           </Link>

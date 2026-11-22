@@ -278,7 +278,7 @@ export function startAigpSync() {
   db.sessions.hook('updating', () => {
     schedule()
   })
-  // Substack time (from the Chrome extension, arriving by sync) counts too.
+  // Web reading time (from the I read extension, arriving by sync) counts too.
   db.webReads.hook('creating', () => {
     schedule()
   })

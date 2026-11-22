@@ -66,7 +66,7 @@ export function SharingSettings() {
                 ? 'This version of the extension can’t post yet: download it again above, replace the folder, and press Reload on chrome://extensions.'
                 : isNative
                   ? 'On the tablet, sharing copies the quote and opens Substack Notes to paste it. Posting it for you works in Chrome on your PC with the I read extension.'
-                  : 'Install the I read extension (Substack, above) and sign in to substack.com in Chrome — then quotes post as Notes straight from here.'}
+                  : 'Install the I read extension (above) and sign in to substack.com in Chrome — then quotes post as Notes straight from here.'}
           </div>
         </div>
       </div>
@@ -74,7 +74,7 @@ export function SharingSettings() {
   )
 }
 
-/** Settings → Substack: the extension to download, and whether it's reporting. */
+/** Settings → I read extension: the extension to download, and whether it's reporting. */
 export function SubstackSettings() {
   const reads = useWebReads()
   const last = reads?.[0]
@@ -91,7 +91,7 @@ export function SubstackSettings() {
           </div>
           {!isNative && (
             <a
-              href="/i-read-substack.zip"
+              href="/i-read-extension.zip"
               download
               className="inline-flex h-9 items-center gap-2 rounded-sm border border-hairline bg-canvas-elevated px-4 text-sm font-medium text-ink transition-colors hover:bg-hairline-soft"
             >
@@ -99,26 +99,26 @@ export function SubstackSettings() {
             </a>
           )}
         </div>
-        {isNative && <p className="mt-3 text-body-sm text-body">It’s for Chrome on your PC: open I read there, Settings → Substack, to download it.</p>}
+        {isNative && <p className="mt-3 text-body-sm text-body">It’s for Chrome on your PC: open I read there, Settings → I read extension, to download it.</p>}
         {ext.outdated && (
           <p className="mt-3 rounded-sm bg-warning/10 px-3 py-2 text-body-sm text-ink">
-            <span className="font-medium">Update the extension</span> (yours is {ext.version}, the newest is {LATEST_EXTENSION}): download it, unzip it over your
-            old <span className="font-medium">i-read-substack</span> folder (chrome://extensions shows where it was loaded from), then press{' '}
-            <span className="font-medium">Reload</span> on the extension. Don’t remove it: that would forget reading time it hasn’t sent yet. Then sign in from its icon.
+            <span className="font-medium">Update the extension</span> (yours is {ext.version}, the newest is {LATEST_EXTENSION}): download it, unzip it, and copy everything inside
+            the new <span className="font-medium">i-read-extension</span> folder into the folder Chrome loads it from (chrome://extensions shows where; yours may still
+            be called i-read-substack), replacing the files. Then press <span className="font-medium">Reload</span> on the extension. Don’t remove it: that would forget reading time it hasn’t sent yet. Then sign in from its icon.
           </p>
         )}
         <ol className="mt-4 list-decimal space-y-1 pl-5 text-body-sm text-body">
-          <li>Download it and unzip — you get an <span className="font-medium text-ink">i-read-substack</span> folder.</li>
+          <li>Download it and unzip — you get an <span className="font-medium text-ink">i-read-extension</span> folder.</li>
           <li>
             In Chrome, open <code className="rounded-[4px] bg-hairline-soft px-1 text-[12px]">chrome://extensions</code> and switch on <span className="font-medium text-ink">Developer mode</span> (top right).
           </li>
           <li>
             Click <span className="font-medium text-ink">Load unpacked</span> and choose the folder.
           </li>
-          <li>Click the I read icon in Chrome’s toolbar and sign in with this account. Then just read on Substack or an X article — on a post, the I read pill (bottom right) has your notes and highlights, and <span className="font-medium text-ink">Alt Shift H</span> highlights with I read instead of the site’s own pop-up.</li>
+          <li>Click the I read icon in Chrome’s toolbar and sign in with this account. Then just read: Substack and X articles count by themselves, and <span className="font-medium text-ink">Alt Shift R</span> (or the icon) turns any other page on. On a page that counts, the I read pill (bottom right) has your notes, highlights and a pause button, and <span className="font-medium text-ink">Alt Shift H</span> highlights with I read instead of the site’s own pop-up.</li>
         </ol>
         <p className="mt-3 text-body-sm text-mute">
-          It counts only while you’re actually reading — the tab in front, on substack.com, newsletters on their own domains, and X articles (never the X feed or normal posts). Like a book here, a post left open asks “Still reading?”, and with no answer the reading time pauses and the still time comes off. Offline, it keeps the time and sends it later.
+          It counts only while you’re actually reading — the tab in front, on substack.com, newsletters on their own domains, X articles (never the X feed or normal posts) and pages you’ve turned on. Like a book here, a page left still for a minute asks “Still reading?”; with no answer, the reading time pauses a minute later and the still time comes off. Offline, it keeps the time and sends it later.
         </p>
       </div>
     </div>

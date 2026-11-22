@@ -55,7 +55,7 @@ export function SubstackNoteSheet({ text, onClose }: { text: string | null; onCl
           : ext.canPost
             ? 'Posted as whoever is signed in to substack.com in this Chrome.'
             : ext.present
-              ? 'Update the I read extension to post Notes from here (Settings → Substack → Download, then reload it).'
+              ? 'Update the I read extension to post Notes from here (Settings → I read extension → Download, then reload it).'
               : 'Posting straight from I read needs Chrome on your PC with the I read extension. Here, copy it and paste it into a new Note.'
       }
       width={480}

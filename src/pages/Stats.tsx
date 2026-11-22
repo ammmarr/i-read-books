@@ -534,7 +534,7 @@ function NoData({ hasBooks }: { hasBooks: boolean }) {
       </div>
       <h2 className="mt-6 text-heading-md text-ink">Your insights will grow here</h2>
       <p className="mt-2 max-w-md text-body-md text-mute">
-        Reading time is tracked automatically while a book is open and you’re active — and on Substack, by the I read extension for Chrome. Read for a few minutes and come back.
+        Reading time is tracked automatically while a book is open and you’re active — and on the web, by the I read extension for Chrome. Read for a few minutes and come back.
       </p>
       <Button className="mt-6" onClick={() => navigate('/')}>
         <BookOpen className="size-4" /> {hasBooks ? 'Go read something' : 'Add a book'}
