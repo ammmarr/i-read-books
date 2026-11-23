@@ -108,6 +108,8 @@ function toMarkdown(list: Item[]) {
 }
 
 const PAGE = 100
+/** The wall: cards in columns, each as tall as its words. */
+const WALL = 'columns-1 gap-3.5 sm:columns-2 lg:columns-3'
 const SPOT_KEY = 'irb-highlights-spot'
 
 /** This visit's place in the browser's history: Back returns to it, a new visit from the menu has its own. */
@@ -276,9 +278,9 @@ export default function Highlights() {
   )
 
   return (
-    <PageContainer className="max-w-[880px]">
+    <PageContainer className="max-w-[1180px]">
       <PageHeader
-        eyebrow="Notebook"
+        eyebrow="Keep"
         title="Highlights"
         subtitle={
           items.length
@@ -315,7 +317,7 @@ export default function Highlights() {
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Find in your highlights and notes"
                   aria-label="Find in your highlights and notes"
-                  className="h-9 w-full rounded-sm border border-hairline bg-canvas-elevated pl-9 pr-3 text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-link focus:ring-3 focus:ring-link/15"
+                  className="h-10 w-full rounded-md border border-hairline bg-canvas-elevated pl-9 pr-3 text-body-md text-ink outline-none transition-[border-color,box-shadow] placeholder:text-faint focus:border-link focus:ring-3 focus:ring-link/15"
                 />
               </label>
               <label className="relative min-w-0 sm:w-[280px]">
@@ -323,7 +325,7 @@ export default function Highlights() {
                   value={source}
                   onChange={(e) => setParam('book', e.target.value, 'all')}
                   aria-label="Book"
-                  className="h-9 w-full appearance-none truncate rounded-sm border border-hairline bg-canvas-elevated pl-3 pr-8 text-body-md text-ink outline-none transition-[border-color,box-shadow] focus:border-link focus:ring-3 focus:ring-link/15"
+                  className="h-10 w-full appearance-none truncate rounded-md border border-hairline bg-canvas-elevated pl-3 pr-8 text-body-md text-ink outline-none transition-[border-color,box-shadow] focus:border-link focus:ring-3 focus:ring-link/15"
                 >
                   <option value="all">All books{sources.articles.length ? ' and articles' : ''}</option>
                   {sources.books.length > 0 && (
@@ -362,25 +364,22 @@ export default function Highlights() {
                 />
               </div>
               {kind !== 'bookmarks' && colorsThere.length > 1 && (
-                <div className="flex items-center sm:gap-0.5" role="group" aria-label="Colour">
-                  <button
-                    onClick={() => setParam('color', 'all', 'all')}
-                    aria-pressed={color === 'all'}
-                    className={`hidden h-7 rounded-full px-2.5 text-body-sm font-medium transition-colors sm:block ${color === 'all' ? 'bg-ink text-canvas' : 'text-body hover:bg-hairline-soft'}`}
-                  >
-                    Any
-                  </button>
-                  {colorsThere.map((c) => (
-                    <button
-                      key={c.key}
-                      aria-label={`Only ${c.label}`}
-                      aria-pressed={color === c.key}
-                      onClick={() => setParam('color', color === c.key ? 'all' : c.key, 'all')}
-                      className={`grid size-7 place-items-center rounded-full ${color === c.key ? 'bg-hairline' : 'hover:bg-hairline-soft'}`}
-                    >
-                      <span className="size-3.5 rounded-full ring-1 ring-black/10" style={{ background: c.swatch }} />
-                    </button>
-                  ))}
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Colour">
+                  {colorsThere.map((c) => {
+                    const on = color === c.key
+                    return (
+                      <button
+                        key={c.key}
+                        aria-pressed={on}
+                        onClick={() => setParam('color', on ? 'all' : c.key, 'all')}
+                        className={`inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-body-sm transition-colors ${on ? 'border-ink/70 bg-hairline-soft text-ink' : 'border-hairline text-body hover:text-ink'}`}
+                      >
+                        <span className="size-2 rounded-full" style={{ background: c.swatch }} />
+                        {c.label}
+                        <span className="tabular text-faint">{(items ?? []).filter((i) => i.color === c.key && (source === 'all' || i.source.id === source || (source === 'substack' && !!i.source.url)) && (!needle || i.words.includes(needle))).length}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
               <Segmented
@@ -408,16 +407,16 @@ export default function Highlights() {
           {shown.length === 0 ? (
             <p className="py-10 text-center text-body-md text-mute">{needle ? `Nothing here has “${query.trim()}” in it.` : 'Nothing here with these filters.'}</p>
           ) : groups ? (
-            <div className="space-y-4">
+            <div className="space-y-8">
               {groups.map((g) => (
-                <section key={g.source.id} className="rounded-md border border-hairline bg-canvas-elevated">
+                <section key={g.source.id}>
                   {!oneSource && <GroupHeader source={g.source} count={g.items.length} />}
-                  <ul className="divide-y divide-hairline">{g.items.map((i) => rowOf(i, false))}</ul>
+                  <div className={WALL}>{g.items.map((i) => rowOf(i, false))}</div>
                 </section>
               ))}
             </div>
           ) : (
-            <ul className="divide-y divide-hairline rounded-md border border-hairline bg-canvas-elevated">{visible.map((i) => rowOf(i, !oneSource))}</ul>
+            <div className={WALL}>{visible.map((i) => rowOf(i, !oneSource))}</div>
           )}
 
           {shown.length > visible.length && (
@@ -439,7 +438,7 @@ function Count({ n }: { n: number }) {
 
 function GroupHeader({ source: s, count }: { source: Source; count: number }) {
   return (
-    <header className="flex items-center gap-3 border-b border-hairline px-4 py-3 sm:px-5">
+    <header className="mb-3 flex items-center gap-3">
       {s.book && <BookCover book={s.book} width={30} rounded="rounded-[2px]" className="shrink-0" />}
       <div className="min-w-0 flex-1">
         <h2 className="truncate text-body-md font-semibold text-ink">{s.title}</h2>
@@ -455,78 +454,80 @@ function Row({ item: i, showSource, onOpen, onCopy, onDelete, onSaveNote }: { it
   const s = i.source
   const swatch = HL_COLORS.find((c) => c.key === i.color)?.swatch
   const when = [i.type !== 'bookmark' && i.page != null ? `p. ${i.page + 1}` : null, relativeTime(i.at)].filter(Boolean).join(' · ')
+  const short = i.text.length > 0 && i.text.length < 70
 
   const body = (
     <>
-      {i.type === 'bookmark' && <span className="block text-body-lg font-medium text-ink">Page {(i.page ?? 0) + 1}</span>}
-      {i.text && <span dir="auto" className="block whitespace-pre-wrap text-start text-body-lg text-ink">{i.text}</span>}
+      {i.type === 'bookmark' && (
+        <span className="flex items-center gap-2 text-body-lg font-medium text-ink">
+          <BookmarkIcon className="size-4 fill-link text-link" /> Page {(i.page ?? 0) + 1}
+        </span>
+      )}
+      {i.text && (
+        <span
+          dir="auto"
+          className={`block whitespace-pre-wrap border-l-2 pl-3 text-start font-serif text-ink ${short ? 'text-[19px] leading-[1.4]' : 'text-[15.5px] leading-[1.55]'}`}
+          style={{ borderColor: swatch ?? '#fcd34d' }}
+        >
+          {i.text}
+        </span>
+      )}
       {i.note && (
-        <span dir="auto" className={`block whitespace-pre-wrap text-start ${i.text ? 'mt-2 rounded-sm bg-hairline-soft px-2.5 py-2 text-body-md text-body' : 'text-body-lg text-ink'}`}>
+        <span dir="auto" className={`block whitespace-pre-wrap text-start ${i.text ? 'ml-3.5 mt-2.5 text-body-sm text-mute' : 'flex gap-2 text-body-md text-ink'}`}>
+          {!i.text && <StickyNote className="mt-0.5 size-4 shrink-0 text-faint" />}
           {i.note}
         </span>
       )}
     </>
   )
-  // The whole row opens it; what's on top of that (the buttons, the note box) sits above.
+  // The whole card opens it; what's on top of that (the buttons, the note box) sits above.
   const opens = 'block w-full text-start outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-link/60'
 
   return (
-    <li className="group relative flex gap-3 px-4 py-3.5 transition-colors first:rounded-t-[inherit] last:rounded-b-[inherit] hover:bg-hairline-soft/50 sm:px-5">
-      <span className="flex w-4 shrink-0 justify-center" aria-hidden="true">
-        {i.type === 'bookmark' ? (
-          <BookmarkIcon className="mt-1 size-4 fill-link text-link" />
-        ) : i.type === 'note' ? (
-          <StickyNote className="mt-1 size-4 text-faint" />
-        ) : (
-          <span className="w-[3px] self-stretch rounded-full" style={{ background: swatch ?? '#fcd34d' }} />
-        )}
-      </span>
-      <div className="min-w-0 flex-1">
-        {s.url ? (
-          <a href={s.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${s.title}`} className={opens}>{body}</a>
-        ) : s.book ? (
-          <button onClick={onOpen} className={opens}>{body}</button>
-        ) : (
-          <div>{body}</div>
-        )}
-        <div className="mt-1 flex min-h-8 items-center gap-2">
-          {/* On a phone the title gets its own line: beside the buttons there'd be no room to read it. */}
-          <p className="flex min-w-0 flex-1 flex-col text-body-sm text-faint sm:flex-row sm:items-center sm:gap-1">
-            {showSource && <span className="min-w-0 truncate text-mute">{s.title}</span>}
-            {showSource && <span aria-hidden="true" className="hidden sm:inline">·</span>}
-            <span className="flex shrink-0 items-center gap-1">
-              {when}
-              {s.url && <ExternalLink className="size-3 shrink-0" />}
-            </span>
-          </p>
-          <div className="relative z-10 flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
-            {i.type !== 'bookmark' && (
-              <IconButton label="Copy" size="icon-sm" onClick={onCopy}>
-                <Copy className="size-3.5" />
-              </IconButton>
-            )}
-            {i.type !== 'bookmark' && (
-              <IconButton label={i.note ? 'Edit note' : 'Add a note'} size="icon-sm" active={editing} onClick={() => setEditing((e) => !e)}>
-                {i.note ? <Pencil className="size-3.5" /> : <StickyNote className="size-3.5" />}
-              </IconButton>
-            )}
-            <IconButton label="Delete" size="icon-sm" className="hover:bg-error/10 hover:text-error" onClick={onDelete}>
-              <Trash2 className="size-3.5" />
+    <div className="group relative mb-3.5 break-inside-avoid rounded-md border border-hairline bg-canvas-elevated px-4 pb-2.5 pt-4 transition-colors hover:border-faint/40">
+      {s.url ? (
+        <a href={s.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${s.title}`} className={opens}>{body}</a>
+      ) : s.book ? (
+        <button onClick={onOpen} className={opens}>{body}</button>
+      ) : (
+        <div>{body}</div>
+      )}
+      <div className="mt-3 flex min-h-8 items-center gap-2.5">
+        {showSource && s.book && <BookCover book={s.book} width={14} rounded="rounded-[2px]" className="shrink-0" />}
+        <p className="min-w-0 flex-1 text-[11.5px] leading-tight text-faint">
+          {showSource && <span className="block truncate font-medium text-mute">{s.title}</span>}
+          <span className="flex items-center gap-1">
+            {when}
+            {s.url && <ExternalLink className="size-3 shrink-0" />}
+          </span>
+        </p>
+        <div className="relative z-10 flex shrink-0 items-center opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100 [@media(pointer:coarse)]:opacity-100">
+          {i.type !== 'bookmark' && (
+            <IconButton label="Copy" size="icon-sm" onClick={onCopy}>
+              <Copy className="size-3.5" />
             </IconButton>
-          </div>
+          )}
+          {i.type !== 'bookmark' && (
+            <IconButton label={i.note ? 'Edit note' : 'Add a note'} size="icon-sm" active={editing} onClick={() => setEditing((e) => !e)}>
+              {i.note ? <Pencil className="size-3.5" /> : <StickyNote className="size-3.5" />}
+            </IconButton>
+          )}
+          <IconButton label="Delete" size="icon-sm" className="hover:bg-error/10 hover:text-error" onClick={onDelete}>
+            <Trash2 className="size-3.5" />
+          </IconButton>
         </div>
-        {editing && (
-          <NoteEditor
-            initial={i.note}
-            onCancel={() => setEditing(false)}
-            onSave={(note) => {
-              setEditing(false)
-              void onSaveNote(note)
-            }}
-          />
-        )}
       </div>
-    </li>
+      {editing && (
+        <NoteEditor
+          initial={i.note}
+          onCancel={() => setEditing(false)}
+          onSave={(note) => {
+            setEditing(false)
+            void onSaveNote(note)
+          }}
+        />
+      )}
+    </div>
   )
 }
 
