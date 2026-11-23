@@ -76,6 +76,24 @@ function Dashboard({ range, sessions, bookSessions, reads, books }: {
   const highlights = useLiveQuery(() => db.highlights.toArray(), [])
   const web = useLiveQuery(() => db.webAnnotations.toArray(), [])
   const marks = useMemo(() => marksOf(highlights ?? [], web ?? [], books), [highlights, web, books])
+  // Each day's books, pages and highlights, for the year of days.
+  const dayInfo = useMemo(() => {
+    const title = new Map(books.map((b) => [b.id, b.title]))
+    const m = new Map<string, { books: string[]; pages: number; marks: number }>()
+    const get = (k: string) => {
+      let d = m.get(k)
+      if (!d) m.set(k, (d = { books: [], pages: 0, marks: 0 }))
+      return d
+    }
+    for (const s of bookSessions) {
+      const d = get(dayKey(s.start))
+      const t = title.get(s.bookId)
+      if (t && !d.books.includes(t)) d.books.push(t)
+      d.pages += s.pages.length
+    }
+    for (const x of marks) get(dayKey(x.at)).marks++
+    return m
+  }, [bookSessions, books, marks])
   const shares = useMemo(() => readShares(), [])
   const highlightsByBook = useMemo(() => {
     const m = new Map<string, number>()
@@ -197,7 +215,7 @@ function Dashboard({ range, sessions, bookSessions, reads, books }: {
         />
         <InsightsCard items={insights} />
       </div>
-      <CommitGraph daily={daily} goal={goal} streak={st} />
+      <CommitGraph daily={daily} goal={goal} streak={st} info={dayInfo} />
       <HighlightsSection marks={marks} books={books} shares={shares} start={start} end={end} prev={prevW} buckets={bs} rangeLabel={r.long} before={before} />
       <YearAndBooks daily={daily} goal={goal} books={books} sessions={bookSessions} highlightsByBook={highlightsByBook} />
     </motion.div>

@@ -78,7 +78,7 @@ export function Hero({ said, stats, aside }: { said: Said; stats: { label: strin
 
 /** Grid steps in minutes: lines land on round numbers (2h, 4h, 6h…), never 90m or 4.5h. */
 const STEPS = [5, 10, 15, 20, 30, 60, 120, 180, 240, 300, 600, 1200, 1800, 3000, 6000, 12000]
-const tick = (m: number) => (m < 60 ? `${Math.round(m)}m` : m % 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${m / 60}h`)
+const tick = (m: number) => (m < 60 ? `${Math.round(m)}m` : m % 60 ? `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}` : `${m / 60}h`)
 
 function smooth(pts: [number, number][], H: number) {
   if (!pts.length) return ''
@@ -162,7 +162,7 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
       <div ref={plot} className="relative ml-10 h-[200px]" onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(null)}>
         {grid.map((m) => (
           <div key={m} className="absolute inset-x-0 border-t border-dashed border-hairline" style={{ top: `${(1 - m / top) * 100}%` }}>
-            <span className="absolute -left-10 w-8 -translate-y-1/2 text-right text-[11px] text-faint">{m ? tick(m) : '0'}</span>
+            <span className="absolute -left-10 w-8 -translate-y-1/2 whitespace-nowrap text-right text-[11px] text-faint">{m ? tick(m) : '0'}</span>
           </div>
         ))}
         <div className="absolute inset-0 flex" aria-hidden="true">
@@ -296,8 +296,24 @@ function shade(seconds: number, goal: number) {
   return f >= 1 ? 'bg-ink' : f >= 0.66 ? 'bg-ink/65' : f >= 0.33 ? 'bg-ink/40' : 'bg-ink/20'
 }
 
-export function CommitGraph({ daily, goal, streak }: { daily: Daily; goal: number; streak: { current: number; longest: number } }) {
+/** What happened on one day: the books you opened, pages read, highlights made. */
+export interface DayInfo {
+  books: string[]
+  pages: number
+  marks: number
+}
+
+export function CommitGraph({ daily, goal, streak, info }: { daily: Daily; goal: number; streak: { current: number; longest: number }; info?: Map<string, DayInfo> }) {
   const scroller = useRef<HTMLDivElement>(null)
+  const box = useRef<HTMLDivElement>(null)
+  // The day you point at (or tap): its details float above it.
+  const [hover, setHover] = useState<{ day: number; secs: number; x: number; y: number } | null>(null)
+  const show = (c: { day: number; secs: number }, el: HTMLElement) => {
+    const b = box.current?.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
+    if (!b) return
+    setHover({ day: c.day, secs: c.secs, x: r.left + r.width / 2 - b.left, y: r.top - b.top })
+  }
   const today = startOfDay(Date.now())
   const monday = addDays(today, -((new Date(today).getDay() + 6) % 7))
   const first = addDays(monday, -52 * 7)
@@ -325,8 +341,9 @@ export function CommitGraph({ daily, goal, streak }: { daily: Daily; goal: numbe
   }, [])
   return (
     <Section title="Consistency" note={`${readDays} of 365 days read · longest streak ${streak.longest} · now ${streak.current}`}>
-      <Card className="!pb-4">
-        <div ref={scroller} className="-mx-1 overflow-x-auto px-1 pb-1">
+      <Card className="relative !pb-4">
+        <div ref={box} className="relative" onMouseLeave={() => setHover(null)}>
+        <div ref={scroller} className="-mx-1 overflow-x-auto px-1 pb-1" onScroll={() => setHover(null)}>
           <div className="grid min-w-[720px] gap-[3px]" style={{ gridTemplateColumns: '26px repeat(53, minmax(0, 1fr))', gridTemplateRows: '14px repeat(7, 12px)' }}>
             {['Mon', '', 'Wed', '', 'Fri', '', ''].map((t, r) => (
               <span key={r} className="text-[10px] leading-3 text-faint" style={{ gridColumn: 1, gridRow: r + 2 }}>{t}</span>
@@ -341,12 +358,15 @@ export function CommitGraph({ daily, goal, streak }: { daily: Daily; goal: numbe
             {cells.map((c) => (
               <i
                 key={c.day}
-                className={`ir-fade rounded-[2.5px] ${shade(c.secs, goal)}`}
+                className={`ir-fade cursor-pointer rounded-[2.5px] transition-shadow ${shade(c.secs, goal)} ${hover?.day === c.day ? 'ring-[1.5px] ring-ink ring-offset-1 ring-offset-canvas-elevated' : ''}`}
                 style={{ gridColumn: c.col, gridRow: c.row, '--i': c.col } as CSSProperties}
-                title={`${new Date(c.day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}: ${c.secs >= 60 ? formatDuration(c.secs) : 'no reading'}`}
+                onMouseEnter={(e) => show(c, e.currentTarget)}
+                onClick={(e) => (hover?.day === c.day ? setHover(null) : show(c, e.currentTarget))}
               />
             ))}
           </div>
+        </div>
+        {hover && <DayCard hover={hover} goal={goal} info={info?.get(dayKey(hover.day))} />}
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-body-sm text-mute">
           <span>Each square is a day; brighter means closer to your goal, or past it.</span>
@@ -360,6 +380,37 @@ export function CommitGraph({ daily, goal, streak }: { daily: Daily; goal: numbe
         </div>
       </Card>
     </Section>
+  )
+}
+
+/** One day of the year, as a small card above its square. */
+function DayCard({ hover, goal, info }: { hover: { day: number; secs: number; x: number; y: number }; goal: number; info?: DayInfo }) {
+  const w = 230
+  const left = Math.max(0, hover.x - w / 2)
+  const met = goal > 0 && hover.secs >= goal
+  const books = info?.books ?? []
+  return (
+    <div
+      className="pointer-events-none absolute z-20 rounded-[10px] border border-hairline bg-canvas-elevated px-3 py-2.5 text-body-sm shadow-floating"
+      style={{ left: `min(${left}px, calc(100% - ${w}px))`, top: hover.y - 8, width: w, transform: 'translateY(-100%)' }}
+    >
+      <div className="font-medium text-ink">{new Date(hover.day).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</div>
+      {hover.secs >= 60 ? (
+        <>
+          <div className="mt-1.5 flex justify-between gap-4"><span className="text-mute">Read</span><span className="font-medium text-ink">{formatDuration(hover.secs)}{met ? ' · goal ✓' : ''}</span></div>
+          {!!info?.pages && <div className="mt-0.5 flex justify-between gap-4"><span className="text-mute">Pages</span><span className="font-medium text-ink">{info.pages}</span></div>}
+          {!!info?.marks && <div className="mt-0.5 flex justify-between gap-4"><span className="text-mute">Highlights</span><span className="font-medium text-ink">{info.marks}</span></div>}
+          {books.length > 0 && (
+            <div className="mt-1.5 border-t border-hairline pt-1.5 text-mute">
+              {books.slice(0, 2).map((t) => <div key={t} className="truncate text-body">{t}</div>)}
+              {books.length > 2 && <div className="text-faint">and {pluralize(books.length - 2, 'other book')}</div>}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="mt-1 text-mute">{info?.marks ? `No reading · ${pluralize(info.marks, 'highlight')}` : 'No reading'}</div>
+      )}
+    </div>
   )
 }
 
