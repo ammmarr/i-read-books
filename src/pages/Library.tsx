@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import { ArrowDownUp, BookOpen, FilePlus, Globe, Plus, Search, X } from 'lucide-react'
@@ -52,6 +52,15 @@ export default function Library() {
     } catch {
       /* ignore */
     }
+  }
+  // The sidebar's Library and Web links say which side to show (?view=books / ?view=web).
+  const [params, setParams] = useSearchParams()
+  const asked = params.get('view')
+  const [seen, setSeen] = useState<string | null>(null)
+  if (asked !== seen) {
+    setSeen(asked)
+    if (asked === 'web' && view !== 'substack') setView('substack')
+    else if (asked === 'books' && view !== 'books') setView('books')
   }
   const [pub, setPub] = useState<string | null>(null)
   const { pick } = useImporter()
@@ -118,7 +127,10 @@ export default function Library() {
         <Segmented<View>
           size="sm"
           value={view}
-          onChange={setView}
+          onChange={(v) => {
+            setView(v)
+            setParams({ view: v === 'substack' ? 'web' : 'books' }, { replace: true })
+          }}
           ariaLabel="Books or the web"
           options={[
             { value: 'books', label: <span className="inline-flex items-center gap-1.5"><BookOpen className="size-3.5" /> Books</span> },
