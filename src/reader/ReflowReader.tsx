@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { AnimatePresence, motion } from 'motion/react'
-import { ArrowLeft, ChevronLeft, ChevronRight, FileText, Minus, Plus, Trophy, Type } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FileText, Minus, Plus, Trophy, Type } from 'lucide-react'
 import { db, type Book } from '../db/db'
 import { setStatus } from '../db/books'
 import type { PDFDocumentProxy } from '../lib/pdf'
 import { dailyGoal, updateSettings, useSettings, type PageTheme } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
-import { vibrate } from '../lib/hooks'
+import { useIsMobile, vibrate } from '../lib/hooks'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { noteOwnPosition } from '../lib/sync'
 import { IconButton } from '../components/ui/Button'
@@ -20,6 +19,7 @@ import { GoToPage, leaveReader, Scrubber } from './ReaderControls'
 import { useReadingSession } from './useReadingSession'
 import { StillReading } from './StillReading'
 import { ReadingClock } from './ReadingClock'
+import { ReaderIsland } from './ReaderIsland'
 
 /**
  * Reading view for a PDF: its text set again as a calm column — your size, line
@@ -90,6 +90,9 @@ export function ReflowReader({ book, doc, onExit }: { book: Book; doc: PDFDocume
   const currentRef = useRef(currentPage)
   const [chrome, setChrome] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  // The island's tool tray.
+  const [tray, setTray] = useState(false)
+  const mobile = useIsMobile()
   const count = book.pageCount
 
   // ── Where you are ───────────────────────────────────────────────────
@@ -339,65 +342,39 @@ export function ReflowReader({ book, doc, onExit }: { book: Book; doc: PDFDocume
         </div>
       </div>
 
-      <AnimatePresence>
-        {chrome && (
-          <motion.header
-            key="top"
-            initial={{ y: -72, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -72, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-            className="safe-top absolute inset-x-0 top-0 z-40 border-b border-hairline bg-canvas/88 backdrop-blur-md"
-          >
-            <div className="flex h-14 items-center gap-1 px-2 sm:px-3">
-              <IconButton label="Back to library" tipBelow onClick={() => leaveReader(navigate)}>
-                <ArrowLeft className="size-[18px]" />
-              </IconButton>
-              <div className="min-w-0 flex-1 px-2">
-                <div className="truncate text-label-sm text-ink">{book.title}</div>
-                <div className="truncate text-body-sm text-mute">Page {currentPage + 1} of {count}</div>
-              </div>
-              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
-                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="max-sm:hidden" />
-              )}
-              <IconButton label="Display: text size, spacing, colour" tipBelow onClick={() => setSettingsOpen(true)}>
-                <Type className="size-[18px]" />
-              </IconButton>
-              <IconButton label="Show the PDF's own pages (Esc)" tipBelow onClick={onExit}>
-                <FileText className="size-[18px]" />
-              </IconButton>
-            </div>
-          </motion.header>
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {chrome && (
-          <motion.footer
-            key="bottom"
-            initial={{ y: 96, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 96, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-            className="safe-bottom absolute inset-x-0 bottom-0 z-40 border-t border-hairline bg-canvas/88 backdrop-blur-md"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mx-auto flex h-16 max-w-[980px] items-center gap-2 px-3 sm:gap-3 sm:px-5">
+      <ReaderIsland
+        show={chrome}
+        title={book.title}
+        sub={`Reading view · page ${currentPage + 1} of ${count}`}
+        onBack={() => leaveReader(navigate)}
+        tray={tray}
+        setTray={setTray}
+        center={
+          <>
+            {!mobile && (
               <IconButton label="Previous page" size="icon-sm" onClick={() => scrollToPage(currentPage - 1, 0, true)} disabled={currentPage === 0}>
                 <ChevronLeft className="size-4" />
               </IconButton>
-              <Scrubber page={currentPage} count={count} chapterFor={() => undefined} bookmarks={NO_BOOKMARKS} onScrub={(p) => scrollToPage(p)} />
+            )}
+            {!mobile && (
+              <div className="flex w-[200px] lg:w-[280px]">
+                <Scrubber page={currentPage} count={count} chapterFor={() => undefined} bookmarks={NO_BOOKMARKS} onScrub={(p) => scrollToPage(p)} />
+              </div>
+            )}
+            {!mobile && (
               <IconButton label="Next page" size="icon-sm" onClick={() => scrollToPage(currentPage + 1, 0, true)} disabled={currentPage >= count - 1}>
                 <ChevronRight className="size-4" />
               </IconButton>
-              <GoToPage page={currentPage} count={count} onGo={(p) => scrollToPage(p)} progress={readSet.current.size / Math.max(1, count)} />
-              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
-                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="sm:hidden" />
-              )}
-            </div>
-          </motion.footer>
-        )}
-      </AnimatePresence>
+            )}
+            <GoToPage page={currentPage} count={count} onGo={(p) => scrollToPage(p)} progress={readSet.current.size / Math.max(1, count)} />
+          </>
+        }
+        clock={settings.showSessionTimer && (sessionSeconds > 0 || awayNow) ? <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} /> : null}
+        tools={[
+          { key: 'display', label: 'Display', icon: <Type className="size-[18px]" />, onClick: () => setSettingsOpen(true) },
+          { key: 'pages', label: 'PDF pages', icon: <FileText className="size-[18px]" />, onClick: onExit },
+        ]}
+      />
 
       <StillReading asking={asking} away={away} stillHere={stillHere} countAway={countAway} dismissAway={dismissAway} />
 

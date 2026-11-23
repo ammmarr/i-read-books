@@ -38,11 +38,11 @@ import {
   chapterForRecap, chaptersOf, coverage, kindOf, lastFinishedChapter, markRecapDue, MIN_RECAP_PAGES, pagesChapter, RECAP_COVERAGE, recapId,
   sectionForRecap, sectionsOf, setBookRecaps, setSectionRecaps, useRecapPrefs, type Chapter,
 } from '../lib/recaps'
-import { Menu } from '../components/ui/Menu'
 import { RecapWriter } from '../components/recap/RecapWriter'
 import { RecapPromptCard } from '../components/recap/RecapPrompt'
 import { StillReading } from './StillReading'
 import { ReadingClock } from './ReadingClock'
+import { ReaderIsland } from './ReaderIsland'
 import { EpubReader } from './EpubReader'
 import { ReflowReader } from './ReflowReader'
 import { isEpubBook, openEpub } from '../lib/epub'
@@ -607,6 +607,8 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
   const scrollState = useRef({ last: 0, down: 0, up: 0, quietUntil: 0 })
   const panelsOpen = sidebar.open || settingsOpen || shortcutsOpen
   const [searchOpen, setSearchOpen] = useState(false)
+  // The island's tool tray.
+  const [tray, setTray] = useState(false)
   const lockChrome = panelsOpen || searchOpen
   const lockRef = useRef(lockChrome)
   lockRef.current = lockChrome || !settings.autoHideChrome
@@ -1786,115 +1788,6 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
         </div>
       </div>
 
-      {/* ── Top bar ── */}
-      <AnimatePresence>
-        {chrome && (
-          <motion.header
-            key="top"
-            initial={{ y: -72, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -72, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-            className="safe-top absolute inset-x-0 top-0 z-40 border-b border-hairline bg-canvas/88 backdrop-blur-md"
-          >
-            <div className="flex h-14 items-center gap-1 px-2 sm:px-3">
-              <IconButton label="Back to library" tipBelow onClick={() => leaveReader(navigate)}>
-                <ArrowLeft className="size-[18px]" />
-              </IconButton>
-              <IconButton label="Contents & notes (T)" tipBelow onClick={() => setSidebar((s) => ({ ...s, open: true }))}>
-                <PanelLeft className="size-[18px]" />
-              </IconButton>
-              <div className="min-w-0 flex-1 px-2">
-                <div className="truncate text-label-sm text-ink">{book.title}</div>
-                <AnimatePresence mode="wait" initial={false}>
-                  <motion.div
-                    key={chapter ?? 'none'}
-                    initial={{ opacity: 0, y: 4 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -4 }}
-                    transition={{ duration: 0.18 }}
-                    className="truncate text-body-sm text-mute"
-                  >
-                    {chapter ?? book.author ?? ' '}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
-                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="max-sm:hidden" />
-              )}
-              {recapTargets.section && recapTargets.chapter ? (
-                <Menu
-                  label="Recap"
-                  trigger={(p) => (
-                    <IconButton {...p} label="Recap (R)" tipBelow className="hidden sm:inline-flex">
-                      <NotebookPen className="size-[18px]" />
-                    </IconButton>
-                  )}
-                  items={[recapTargets.section, recapTargets.chapter].map((u) => ({
-                    label: (
-                      <span className="block min-w-0">
-                        <span className="block text-label-sm">{kindOf(u) === 'section' ? 'This section' : 'This chapter'}</span>
-                        <span className="block truncate text-body-sm text-mute">{u.title}</span>
-                      </span>
-                    ),
-                    onSelect: () => openRecap(u),
-                  }))}
-                />
-              ) : (
-                <IconButton label="Recap this chapter (R)" tipBelow className="hidden sm:inline-flex" onClick={recapHere}>
-                  <NotebookPen className="size-[18px]" />
-                </IconButton>
-              )}
-              <IconButton
-                label={view.mode === 'width' ? 'Back to normal width (Ctrl+F)' : 'Fit to width (Ctrl+F)'}
-                tipBelow
-                active={view.mode === 'width'}
-                onClick={toggleFitWidth}
-              >
-                {view.mode === 'width' ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />}
-              </IconButton>
-              <IconButton label="Search (/)" tipBelow active={searchOpen} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}>
-                <Search className="size-[18px]" />
-              </IconButton>
-              <IconButton
-                label={lookupOn ? 'Stop looking up words' : touch ? 'Look up words' : 'Look up words (or hold Shift)'}
-                tipBelow
-                active={lookupOn}
-                aria-pressed={lookupOn}
-                onClick={() => {
-                  const on = !lookupOn
-                  setLookupOn(on)
-                  if (on) toast({ id: 'lookup', message: `${touch ? 'Tap' : 'Click'} a word to see its meaning`, description: 'Tap the book icon again when you’re done.', duration: 3000 })
-                }}
-              >
-                <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />
-              </IconButton>
-              <IconButton label={bookmarked ? 'Remove bookmark (B)' : 'Bookmark page (B)'} tipBelow onClick={toggleBookmark}>
-                <motion.span key={String(bookmarked)} initial={{ scale: 0.6 }} animate={{ scale: 1 }} transition={{ type: 'spring', stiffness: 600, damping: 18 }} className="grid">
-                  <BookmarkIcon className={`size-[18px] ${bookmarked ? 'fill-link text-link' : ''}`} />
-                </motion.span>
-              </IconButton>
-              <IconButton label="Reading view: text at your own size, filling the screen" tipBelow onClick={onReflow}>
-                <TextAlignStart className="size-[18px]" />
-              </IconButton>
-              <IconButton label="Display" tipBelow onClick={() => setSettingsOpen(true)}>
-                <Type className="size-[18px]" />
-              </IconButton>
-              {!touch && (
-                <IconButton label="Keyboard shortcuts (?)" tipBelow className="hidden lg:inline-flex" onClick={() => setShortcutsOpen(true)}>
-                  <Keyboard className="size-[18px]" />
-                </IconButton>
-              )}
-              {(isNative || document.fullscreenEnabled) && (
-                <IconButton label={fullscreen ? 'Exit full screen (F)' : 'Full screen (F)'} tipBelow className={isNative ? '' : 'hidden sm:inline-flex'} onClick={toggleFullscreen}>
-                  {fullscreen ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />}
-                </IconButton>
-              )}
-            </div>
-          </motion.header>
-        )}
-      </AnimatePresence>
-
       <AnimatePresence>
         {searchOpen && (
           <SearchPanel
@@ -1916,67 +1809,91 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
         )}
       </AnimatePresence>
 
-      {/* ── Bottom bar ── */}
-      <AnimatePresence>
-        {chrome && (
-          <motion.footer
-            key="bottom"
-            initial={{ y: 96, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 96, opacity: 0 }}
-            transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-            className="safe-bottom absolute inset-x-0 bottom-0 z-40 border-t border-hairline bg-canvas/88 backdrop-blur-md"
-          >
-            <div className="mx-auto flex h-16 max-w-[980px] items-center gap-2 px-3 sm:gap-3 sm:px-5">
+      {/* ── The island: back, where you are, the clock, and the tools ── */}
+      <ReaderIsland
+        show={chrome}
+        title={book.title}
+        sub={chapter ?? book.author ?? undefined}
+        onBack={() => leaveReader(navigate)}
+        tray={tray}
+        setTray={setTray}
+        center={
+          <>
+            {!mobile && (
               <IconButton label="Previous page (←)" size="icon-sm" onClick={() => scrollToPage(currentPage - 1, { smooth: true })} disabled={currentPage === 0}>
                 <ChevronLeft className="size-4" />
               </IconButton>
-              <Scrubber
-                page={currentPage}
-                count={book.pageCount}
-                chapterFor={chapterFor}
-                bookmarks={bmPages}
-                onScrub={(p) => {
-                  holdPlace(p, false)
-                  scrollToPage(p)
-                }}
-              />
+            )}
+            {!mobile && (
+              <div className="flex w-[200px] lg:w-[280px]">
+                <Scrubber
+                  page={currentPage}
+                  count={book.pageCount}
+                  chapterFor={chapterFor}
+                  bookmarks={bmPages}
+                  onScrub={(p) => {
+                    holdPlace(p, false)
+                    scrollToPage(p)
+                  }}
+                />
+              </div>
+            )}
+            {!mobile && (
               <IconButton label="Next page (→)" size="icon-sm" onClick={() => scrollToPage(currentPage + 1, { smooth: true })} disabled={currentPage >= book.pageCount - 1}>
                 <ChevronRight className="size-4" />
               </IconButton>
-              <GoToPage
-                page={currentPage}
-                count={book.pageCount}
-                onGo={(p) => {
-                  holdPlace(p, false)
-                  scrollToPage(p)
-                }}
-                progress={readN / Math.max(1, book.pageCount)} />
-              {/* On a phone the reading time and its pause button sit here: the top bar has no room. */}
-              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
-                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="sm:hidden" />
-              )}
-              {!mobile && (
-                <div className="ml-1 flex items-center rounded-full border border-hairline">
-                  <IconButton label="Zoom out (Ctrl −)" size="icon-sm" onClick={() => stepZoom(-1)}>
-                    <Minus className="size-3.5" />
-                  </IconButton>
-                  <button
-                    onClick={() => zoomTo({ mode: view.mode === 'width' ? 'auto' : 'width', zoom: scale })}
-                    title={view.mode === 'width' ? 'Back to auto' : 'Fit width'}
-                    className="w-12 text-center text-body-sm tabular text-body hover:text-ink"
-                  >
-                    {zoomPercent}%
-                  </button>
-                  <IconButton label="Zoom in (Ctrl +)" size="icon-sm" onClick={() => stepZoom(1)}>
-                    <Plus className="size-3.5" />
-                  </IconButton>
-                </div>
-              )}
-            </div>
-          </motion.footer>
-        )}
-      </AnimatePresence>
+            )}
+            <GoToPage
+              page={currentPage}
+              count={book.pageCount}
+              onGo={(p) => {
+                holdPlace(p, false)
+                scrollToPage(p)
+              }}
+              progress={readN / Math.max(1, book.pageCount)} />
+          </>
+        }
+        clock={settings.showSessionTimer && (sessionSeconds > 0 || awayNow) ? <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} /> : null}
+        tools={[
+          { key: 'toc', label: 'Contents', icon: <PanelLeft className="size-[18px]" />, onClick: () => setSidebar((s) => ({ ...s, open: true })) },
+          { key: 'search', label: 'Search', icon: <Search className="size-[18px]" />, active: searchOpen, onClick: () => (searchOpen ? closeSearch() : setSearchOpen(true)) },
+          recapTargets.section && recapTargets.chapter
+            ? {
+                key: 'recap',
+                label: 'Recap',
+                icon: <NotebookPen className="size-[18px]" />,
+                menu: [recapTargets.section, recapTargets.chapter].map((u) => ({
+                  label: (
+                    <span className="block min-w-0">
+                      <span className="block text-label-sm">{kindOf(u) === 'section' ? 'This section' : 'This chapter'}</span>
+                      <span className="block truncate text-body-sm text-mute">{u.title}</span>
+                    </span>
+                  ),
+                  onSelect: () => openRecap(u),
+                })),
+              }
+            : { key: 'recap', label: 'Recap', icon: <NotebookPen className="size-[18px]" />, onClick: recapHere },
+          {
+            key: 'lookup',
+            label: lookupOn ? 'Stop look-up' : 'Look up',
+            icon: <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />,
+            active: lookupOn,
+            onClick: () => {
+              const on = !lookupOn
+              setLookupOn(on)
+              if (on) toast({ id: 'lookup', message: `${touch ? 'Tap' : 'Click'} a word to see its meaning`, description: 'Turn Look up off in the tools when you’re done.', duration: 3000 })
+            },
+          },
+          { key: 'bookmark', label: bookmarked ? 'Bookmarked' : 'Bookmark', icon: <BookmarkIcon className={`size-[18px] ${bookmarked ? 'fill-link text-link' : ''}`} />, active: bookmarked, onClick: () => void toggleBookmark() },
+          { key: 'width', label: view.mode === 'width' ? 'Normal width' : 'Fit width', icon: view.mode === 'width' ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />, active: view.mode === 'width', onClick: toggleFitWidth },
+          { key: 'reflow', label: 'Reading view', icon: <TextAlignStart className="size-[18px]" />, onClick: onReflow },
+          { key: 'display', label: 'Display', icon: <Type className="size-[18px]" />, onClick: () => setSettingsOpen(true) },
+          { key: 'zoomout', label: 'Zoom out', icon: <Minus className="size-[18px]" />, onClick: () => stepZoom(-1), keepOpen: true, hidden: mobile },
+          { key: 'zoomin', label: 'Zoom in', icon: <Plus className="size-[18px]" />, onClick: () => stepZoom(1), keepOpen: true, hidden: mobile },
+          { key: 'keys', label: 'Shortcuts', icon: <Keyboard className="size-[18px]" />, onClick: () => setShortcutsOpen(true), hidden: touch },
+          { key: 'full', label: fullscreen ? 'Exit full screen' : 'Full screen', icon: fullscreen ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />, onClick: toggleFullscreen, hidden: !(isNative || document.fullscreenEnabled) },
+        ]}
+      />
 
       <ElsewherePill
         page={elsewhere && !place ? elsewhere.page : null}

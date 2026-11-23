@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { AnimatePresence, motion } from 'motion/react'
-import { ArrowLeft, BookA, Bookmark as BookmarkIcon, ChevronLeft, ChevronRight, FoldHorizontal, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Trophy, Type, UnfoldHorizontal } from 'lucide-react'
+import { AnimatePresence } from 'motion/react'
+import { BookA, Bookmark as BookmarkIcon, ChevronLeft, ChevronRight, FoldHorizontal, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Trophy, Type, UnfoldHorizontal } from 'lucide-react'
 import type { FoliateBook, FoliateTocItem } from 'foliate-js/view.js'
 import { EpubScroller, type NoteCard, type PageLook, type ScrollLocation, type SearchHit } from './epubScroller'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor } from '../db/db'
@@ -23,6 +23,7 @@ import { SubstackNoteSheet } from '../components/ShareQuote'
 import { useReadingSession } from './useReadingSession'
 import { StillReading } from './StillReading'
 import { ReadingClock } from './ReadingClock'
+import { ReaderIsland } from './ReaderIsland'
 import { HL_COLORS, HighlightPopover, SelectionToolbar, type ShareTo } from './HighlightTools'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
@@ -190,6 +191,8 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   const [fullscreen, setFullscreen] = useState(!!document.fullscreenElement)
   const [typeOpen, setTypeOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  // The island's tool tray.
+  const [tray, setTray] = useState(false)
   const [type, setType] = useState<TypePrefs>(loadType)
   const [note, setNote] = useState<NoteCard | null>(null)
 
@@ -1120,80 +1123,6 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         </div>
       )}
 
-      {/* ── Top bar ── */}
-      <AnimatePresence>
-        {chrome && (
-          <motion.header
-            key="top"
-            initial={{ y: -12, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: -12, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="safe-top absolute inset-x-0 top-0 z-40 border-b border-hairline bg-canvas/88 backdrop-blur-md"
-          >
-            <div className="flex h-14 items-center gap-1 px-2 sm:px-3">
-              <IconButton label="Back to library" tipBelow onClick={() => leaveReader(navigate)}>
-                <ArrowLeft className="size-[18px]" />
-              </IconButton>
-              <IconButton label="Contents & notes (T)" tipBelow onClick={() => setTocOpen(true)}>
-                <PanelLeft className="size-[18px]" />
-              </IconButton>
-              <div className="min-w-0 flex-1 px-2">
-                <div className="truncate text-label-sm text-ink">{book.title}</div>
-                <div className="truncate text-body-sm text-mute">
-                  {chapter ?? book.author ?? ' '}
-                  {minutesLeft >= 1 && <span className="hidden sm:inline"> · {minutesLeft} min left in chapter</span>}
-                </div>
-              </div>
-              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
-                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="max-sm:hidden" />
-              )}
-              <IconButton label={markedHere ? 'Remove bookmark (B)' : 'Bookmark this page (B)'} tipBelow active={!!markedHere} onClick={() => void toggleBookmark()}>
-                <BookmarkIcon className={`size-[18px] ${markedHere ? 'fill-link text-link' : ''}`} />
-              </IconButton>
-              <span className="hidden sm:inline-flex">
-                <IconButton
-                  label={type.wide ? 'Comfortable column (Ctrl F)' : 'Fill the screen with text (Ctrl F)'}
-                  tipBelow
-                  active={type.wide}
-                  onClick={() => setType((t) => ({ ...t, wide: !t.wide }))}
-                >
-                  {type.wide ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />}
-                </IconButton>
-              </span>
-              <IconButton label={fullscreen ? 'Exit full screen (F)' : 'Full screen (F)'} tipBelow className={isNative ? '' : 'hidden sm:inline-flex'} onClick={toggleFullscreen}>
-                {fullscreen ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />}
-              </IconButton>
-              {!touch && (
-                <IconButton label="Keyboard shortcuts (?)" tipBelow className="hidden lg:inline-flex" onClick={() => setShortcutsOpen(true)}>
-                  <Keyboard className="size-[18px]" />
-                </IconButton>
-              )}
-              <IconButton label="Search (/)" tipBelow active={searchOpen} onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}>
-                <Search className="size-[18px]" />
-              </IconButton>
-              <IconButton
-                label={lookupOn ? 'Stop looking up words' : touch ? 'Look up words' : 'Look up words (or Shift-click a word)'}
-                tipBelow
-                active={lookupOn}
-                aria-pressed={lookupOn}
-                onClick={() => {
-                  const on = !lookupOn
-                  setLookupOn(on)
-                  dropSelection()
-                  if (on) toast({ id: 'lookup', message: 'Tap a word for its meaning', duration: 2500 })
-                }}
-              >
-                <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />
-              </IconButton>
-              <IconButton label="Text and page" tipBelow onClick={() => setTypeOpen(true)}>
-                <Type className="size-[18px]" />
-              </IconButton>
-            </div>
-          </motion.header>
-        )}
-      </AnimatePresence>
-
       <AnimatePresence>
         {searchOpen && (
           <SearchPanel
@@ -1213,51 +1142,64 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         )}
       </AnimatePresence>
 
-      {/* ── Bottom bar ── */}
-      <AnimatePresence>
-        {chrome && (
-          <motion.footer
-            key="bottom"
-            initial={{ y: 12, opacity: 0 }}
-            animate={{ y: 0, opacity: 1 }}
-            exit={{ y: 12, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="safe-bottom absolute inset-x-0 bottom-0 z-40 border-t border-hairline bg-canvas/88 backdrop-blur-md"
-          >
-            <div className="mx-auto flex h-16 max-w-[980px] items-center gap-2 px-3 sm:gap-3 sm:px-5">
+      {/* ── The island: back, where you are, the clock, and the tools ── */}
+      <ReaderIsland
+        show={chrome}
+        title={book.title}
+        sub={
+          <>
+            {chapter ?? book.author ?? ' '}
+            {minutesLeft >= 1 && <span className="hidden sm:inline"> · {minutesLeft} min left in chapter</span>}
+          </>
+        }
+        onBack={() => leaveReader(navigate)}
+        tray={tray}
+        setTray={setTray}
+        center={
+          <>
+            {!touch && (
               <IconButton label="Previous screen (←)" size="icon-sm" onClick={() => (touched(), void viewRef.current?.prev())}>
                 <ChevronLeft className="size-4" />
               </IconButton>
-              <Scrubber page={here} count={total} chapterFor={chapterFor} bookmarks={bmPages} onScrub={goToPage} />
+            )}
+            {!touch && (
+              <div className="hidden w-[200px] sm:flex lg:w-[280px]">
+                <Scrubber page={here} count={total} chapterFor={chapterFor} bookmarks={bmPages} onScrub={goToPage} />
+              </div>
+            )}
+            {!touch && (
               <IconButton label="Next screen (→)" size="icon-sm" onClick={() => (touched(), void viewRef.current?.next())}>
                 <ChevronRight className="size-4" />
               </IconButton>
-              <GoToPage page={here} count={total} onGo={goToPage} progress={readN / Math.max(1, total)} />
-              {/* On a phone the reading time and its pause button sit here: the top bar has no room. */}
-              {settings.showSessionTimer && (sessionSeconds > 0 || awayNow) && (
-                <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} className="sm:hidden" />
-              )}
-              {!touch && (
-                <div className="ml-1 hidden items-center rounded-full border border-hairline sm:flex">
-                  <IconButton label="Smaller text (Ctrl −)" size="icon-sm" onClick={() => zoom(-1)}>
-                    <Minus className="size-3.5" />
-                  </IconButton>
-                  <button
-                    onClick={() => setType((t) => ({ ...t, size: 100 }))}
-                    title="Back to normal size"
-                    className="w-12 text-center text-body-sm tabular text-body hover:text-ink"
-                  >
-                    {type.size}%
-                  </button>
-                  <IconButton label="Bigger text (Ctrl +)" size="icon-sm" onClick={() => zoom(1)}>
-                    <Plus className="size-3.5" />
-                  </IconButton>
-                </div>
-              )}
-            </div>
-          </motion.footer>
-        )}
-      </AnimatePresence>
+            )}
+            <GoToPage page={here} count={total} onGo={goToPage} progress={readN / Math.max(1, total)} />
+          </>
+        }
+        clock={settings.showSessionTimer && (sessionSeconds > 0 || awayNow) ? <ReadingClock seconds={sessionSeconds} paused={awayNow} onPause={pause} onResume={stillHere} /> : null}
+        tools={[
+          { key: 'toc', label: 'Contents', icon: <PanelLeft className="size-[18px]" />, onClick: () => setTocOpen(true) },
+          { key: 'search', label: 'Search', icon: <Search className="size-[18px]" />, active: searchOpen, onClick: () => (searchOpen ? closeSearch() : setSearchOpen(true)) },
+          {
+            key: 'lookup',
+            label: lookupOn ? 'Stop look-up' : 'Look up',
+            icon: <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />,
+            active: lookupOn,
+            onClick: () => {
+              const on = !lookupOn
+              setLookupOn(on)
+              dropSelection()
+              if (on) toast({ id: 'lookup', message: 'Tap a word for its meaning', duration: 2500 })
+            },
+          },
+          { key: 'bookmark', label: markedHere ? 'Bookmarked' : 'Bookmark', icon: <BookmarkIcon className={`size-[18px] ${markedHere ? 'fill-link text-link' : ''}`} />, active: !!markedHere, onClick: () => void toggleBookmark() },
+          { key: 'wide', label: type.wide ? 'Comfortable column' : 'Fill the screen', icon: type.wide ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />, active: type.wide, onClick: () => setType((t) => ({ ...t, wide: !t.wide })), hidden: touch },
+          { key: 'type', label: 'Text and page', icon: <Type className="size-[18px]" />, onClick: () => setTypeOpen(true) },
+          { key: 'smaller', label: 'Smaller text', icon: <Minus className="size-[18px]" />, onClick: () => zoom(-1), keepOpen: true, hidden: touch },
+          { key: 'bigger', label: 'Bigger text', icon: <Plus className="size-[18px]" />, onClick: () => zoom(1), keepOpen: true, hidden: touch },
+          { key: 'keys', label: 'Shortcuts', icon: <Keyboard className="size-[18px]" />, onClick: () => setShortcutsOpen(true), hidden: touch },
+          { key: 'full', label: fullscreen ? 'Exit full screen' : 'Full screen', icon: fullscreen ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />, onClick: toggleFullscreen, hidden: !(isNative || document.fullscreenEnabled) },
+        ]}
+      />
 
       <ElsewherePill
         page={place ? null : elsewhere}
