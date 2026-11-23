@@ -453,3 +453,26 @@ button, [role='button'], a { -webkit-user-select: none; user-select: none; }
   /* Everything is simply there: numbers and words at their value, the highlight already marked. */
   .wb-col, .wb-mark, .wb-bar { animation: none; }
 }
+
+/* ── Page entrances: things arrive in order, once, as the page opens ──
+   Delays come from --i (the item's place); fill-mode "backwards" so hover and
+   selection transforms work normally once an entrance is over. */
+@keyframes ir-rise { from { opacity: 0; transform: translateY(12px); } }
+@keyframes ir-spine { from { opacity: 0; transform: translateY(34px); } }
+@keyframes ir-fade { from { opacity: 0; } }
+@keyframes ir-grow-y { from { transform: scaleY(0); } }
+@keyframes ir-grow-x { from { transform: scaleX(0); } }
+@keyframes ir-lit { from { background-color: var(--color-hairline); } }
+@keyframes ir-draw { from { stroke-dashoffset: 1; } }
+@keyframes ir-slide { from { opacity: 0; transform: translateX(14px); } }
+.ir-rise { animation: ir-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) backwards; animation-delay: calc(min(var(--i, 0), 16) * 45ms + var(--d, 0ms)); }
+.ir-spine { animation: ir-spine 0.6s cubic-bezier(0.2, 0.9, 0.25, 1) backwards; animation-delay: calc(min(var(--i, 0), 40) * 24ms + 80ms); }
+.ir-fade { animation: ir-fade 0.5s ease-out backwards; animation-delay: calc(var(--i, 0) * 14ms + var(--d, 0ms)); }
+.ir-grow-y { transform-origin: bottom; animation: ir-grow-y 0.7s cubic-bezier(0.16, 1, 0.3, 1) backwards; animation-delay: calc(min(var(--i, 0), 40) * 22ms + var(--d, 120ms)); }
+.ir-grow-x { transform-origin: left; animation: ir-grow-x 0.8s cubic-bezier(0.16, 1, 0.3, 1) backwards; animation-delay: calc(var(--i, 0) * 60ms + var(--d, 150ms)); }
+.ir-lit { animation: ir-lit 0.35s ease-out backwards; animation-delay: calc(var(--i, 0) * 18ms + var(--d, 200ms)); }
+.ir-draw { stroke-dasharray: 1; stroke-dashoffset: 0; animation: ir-draw 1.2s cubic-bezier(0.45, 0, 0.2, 1) backwards; animation-delay: var(--d, 350ms); }
+.ir-slide { animation: ir-slide 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards; }
+@media (prefers-reduced-motion: reduce) {
+  .ir-rise, .ir-spine, .ir-fade, .ir-grow-y, .ir-grow-x, .ir-lit, .ir-draw, .ir-slide { animation: none; }
+}

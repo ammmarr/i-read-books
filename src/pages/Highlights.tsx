@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { Bookmark as BookmarkIcon, ChevronDown, Copy, ExternalLink, Highlighter, Pencil, Search, StickyNote, Trash2 } from 'lucide-react'
@@ -273,8 +273,8 @@ export default function Highlights() {
   const oneSource = source !== 'all' && source !== 'substack'
   const groups = sort === 'book' ? bySource(visible) : null
 
-  const rowOf = (i: Item, showSource: boolean) => (
-    <Row key={i.key} item={i} showSource={showSource} onOpen={() => openInBook(i)} onCopy={() => void copyOne(i)} onDelete={() => void remove(i)} onSaveNote={(n) => saveNote(i, n)} />
+  const rowOf = (i: Item, showSource: boolean, order = 0) => (
+    <Row key={i.key} order={order} item={i} showSource={showSource} onOpen={() => openInBook(i)} onCopy={() => void copyOne(i)} onDelete={() => void remove(i)} onSaveNote={(n) => saveNote(i, n)} />
   )
 
   return (
@@ -411,12 +411,12 @@ export default function Highlights() {
               {groups.map((g) => (
                 <section key={g.source.id}>
                   {!oneSource && <GroupHeader source={g.source} count={g.items.length} />}
-                  <div className={WALL}>{g.items.map((i) => rowOf(i, false))}</div>
+                  <div className={WALL}>{g.items.map((i, n) => rowOf(i, false, n))}</div>
                 </section>
               ))}
             </div>
           ) : (
-            <div className={WALL}>{visible.map((i) => rowOf(i, !oneSource))}</div>
+            <div className={WALL}>{visible.map((i, n) => rowOf(i, !oneSource, n))}</div>
           )}
 
           {shown.length > visible.length && (
@@ -449,7 +449,7 @@ function GroupHeader({ source: s, count }: { source: Source; count: number }) {
   )
 }
 
-function Row({ item: i, showSource, onOpen, onCopy, onDelete, onSaveNote }: { item: Item; showSource: boolean; onOpen: () => void; onCopy: () => void; onDelete: () => void; onSaveNote: (note: string) => Promise<void> }) {
+function Row({ item: i, showSource, onOpen, onCopy, onDelete, onSaveNote, order = 0 }: { item: Item; showSource: boolean; order?: number; onOpen: () => void; onCopy: () => void; onDelete: () => void; onSaveNote: (note: string) => Promise<void> }) {
   const [editing, setEditing] = useState(false)
   const s = i.source
   const swatch = HL_COLORS.find((c) => c.key === i.color)?.swatch
@@ -484,7 +484,7 @@ function Row({ item: i, showSource, onOpen, onCopy, onDelete, onSaveNote }: { it
   const opens = 'block w-full text-start outline-none after:absolute after:inset-0 after:rounded-[inherit] focus-visible:after:ring-2 focus-visible:after:ring-inset focus-visible:after:ring-link/60'
 
   return (
-    <div className="group relative mb-3.5 break-inside-avoid rounded-md border border-hairline bg-canvas-elevated px-4 pb-2.5 pt-4 transition-colors hover:border-faint/40">
+    <div className="ir-rise group relative mb-3.5 break-inside-avoid rounded-md border border-hairline bg-canvas-elevated px-4 pb-2.5 pt-4 transition-[border-color,transform,box-shadow] duration-200 hover:-translate-y-0.5 hover:border-faint/40 hover:shadow-floating" style={{ '--i': order } as CSSProperties}>
       {s.url ? (
         <a href={s.url} target="_blank" rel="noopener noreferrer" aria-label={`Open ${s.title}`} className={opens}>{body}</a>
       ) : s.book ? (

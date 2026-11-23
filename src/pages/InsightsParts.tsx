@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { CountUp } from '../components/CountUp'
 import { useNavigate } from 'react-router'
 import { RotateCw, TrendingUp } from 'lucide-react'
 import type { Book, HighlightColor, Session } from '../db/db'
@@ -153,7 +154,7 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
     <Card className="!pb-4">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[26px] font-medium leading-tight tracking-[-0.6px] text-ink">{formatDuration(total)}</div>
+          <div className="text-[26px] font-medium leading-tight tracking-[-0.6px] text-ink"><CountUp value={total} format={(n) => formatDuration(n)} /></div>
           <div className="text-body-sm text-mute">Time reading</div>
         </div>
         {change != null && change > 0.005 && <Up text={`${(change * 100).toFixed(change < 0.1 ? 1 : 0)}% over ${before}`} />}
@@ -168,8 +169,8 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
           {mins.map((m, i) => (
             <div key={i} className="flex h-full flex-1 items-end justify-center">
               <i
-                className={`w-[46%] rounded-t-[2px] transition-colors ${i === hover ? 'bg-mute' : i === live ? 'bg-hairline/50' : 'bg-hairline'}`}
-                style={{ height: `${Math.max(1, (m / top) * 100)}%` }}
+                className={`ir-grow-y w-[46%] rounded-t-[2px] transition-[background-color,height] duration-300 ${i === hover ? 'bg-mute' : i === live ? 'bg-hairline/50' : 'bg-hairline'}`}
+                style={{ height: `${Math.max(1, (m / top) * 100)}%`, '--i': i } as CSSProperties}
               />
             </div>
           ))}
@@ -181,8 +182,8 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
               <stop offset="1" stopColor="var(--color-ink)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {area && <path d={area} fill="url(#insights-area)" />}
-          {pts.length > 1 && <path d={line} fill="none" stroke="var(--color-body)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />}
+          {area && <path key={`a${grain}${n}`} d={area} fill="url(#insights-area)" className="ir-fade" style={{ '--d': '700ms' } as CSSProperties} />}
+          {pts.length > 1 && <path key={`l${grain}${n}`} d={line} pathLength={1} fill="none" stroke="var(--color-body)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" className="ir-draw" />}
         </svg>
         {goal > 0 && goal / 60 <= top && (
           <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-faint/60" style={{ top: `${(1 - goal / 60 / top) * 100}%` }}>
@@ -340,8 +341,8 @@ export function CommitGraph({ daily, goal, streak }: { daily: Daily; goal: numbe
             {cells.map((c) => (
               <i
                 key={c.day}
-                className={`rounded-[2.5px] ${shade(c.secs, goal)}`}
-                style={{ gridColumn: c.col, gridRow: c.row }}
+                className={`ir-fade rounded-[2.5px] ${shade(c.secs, goal)}`}
+                style={{ gridColumn: c.col, gridRow: c.row, '--i': c.col } as CSSProperties}
                 title={`${new Date(c.day).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}: ${c.secs >= 60 ? formatDuration(c.secs) : 'no reading'}`}
               />
             ))}
@@ -384,7 +385,7 @@ function Kpi({ label, value, change, sub }: { label: string; value: string; chan
   return (
     <Card>
       <div className="text-body-sm text-mute">{label}</div>
-      <div className="mt-2 text-[26px] font-medium leading-tight tracking-[-0.6px] text-ink">{value}</div>
+      <div className="mt-2 text-[26px] font-medium leading-tight tracking-[-0.6px] text-ink">{/^\d+$/.test(value) ? <CountUp value={Number(value)} /> : value}</div>
       <div className="mt-1.5 min-h-5">{change}</div>
       <div className="mt-1 text-body-sm text-faint">{sub}</div>
     </Card>
@@ -492,7 +493,7 @@ export function HighlightsSection({ marks, books, shares, start, end, prev, buck
             <div className="mt-4">
               <div className="flex items-baseline justify-between text-body-sm"><span className="text-mute">By colour</span><span className="text-faint">{now.length} in all</span></div>
               <div className="mt-2.5 flex gap-[3px]">
-                {colours.map((c) => <div key={c.key} className="h-3.5 rounded-[4px]" style={{ ...dot(c.key), width: `${(c.n / now.length) * 100}%` }} title={`${c.name}: ${c.n}`} />)}
+                {colours.map((c, i) => <div key={c.key} className="ir-grow-x h-3.5 rounded-[4px]" style={{ ...dot(c.key), width: `${(c.n / now.length) * 100}%`, '--i': i } as CSSProperties} title={`${c.name}: ${c.n}`} />)}
               </div>
               <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-body-sm text-mute">
                 {colours.map((c) => (
@@ -509,7 +510,7 @@ export function HighlightsSection({ marks, books, shares, start, end, prev, buck
               {peak > 0 && <span className="truncate text-faint">most: {buckets[peakAt].title}, {peak}</span>}
             </div>
             <div className="flex h-16 items-end gap-[3px]" aria-hidden="true">
-              {perBucket.map((v, i) => <i key={i} className={`flex-1 rounded-t-[2px] ${v === peak && v > 0 ? 'bg-ink' : 'bg-hairline'}`} style={{ height: `${peak ? Math.max(4, (v / peak) * 100) : 4}%` }} />)}
+              {perBucket.map((v, i) => <i key={i} className={`ir-grow-y flex-1 rounded-t-[2px] ${v === peak && v > 0 ? 'bg-ink' : 'bg-hairline'}`} style={{ height: `${peak ? Math.max(4, (v / peak) * 100) : 4}%`, '--i': i } as CSSProperties} />)}
             </div>
             {buckets.length > 1 && (
               <div className="mt-2 flex justify-between text-[11px] text-faint"><span>{buckets[0].label}</span><span>{buckets[buckets.length - 1].label}</span></div>
@@ -590,8 +591,9 @@ export function YearAndBooks({ daily, goal, books, sessions, highlightsByBook }:
                 <i
                   key={x.d}
                   onMouseEnter={() => setHover(i)}
-                  className={`absolute left-1/2 top-1/2 rounded-[1px] ${hover === i ? 'bg-link' : x.secs < 60 ? 'bg-hairline' : 'bg-ink'}`}
+                  className={`ir-fade absolute left-1/2 top-1/2 rounded-[1px] ${hover === i ? 'bg-link' : x.secs < 60 ? 'bg-hairline' : 'bg-ink'}`}
                   style={{
+                    ['--i' as string]: Math.round(i / 3),
                     width: 1.8,
                     marginLeft: -0.9,
                     height: 7 + Math.min(80, x.secs / 60) * 0.3,
@@ -655,7 +657,7 @@ export function YearAndBooks({ daily, goal, books, sessions, highlightsByBook }:
                         <span className="shrink-0 text-body-sm text-mute">{g.date != null ? (g.days === 0 ? 'ends today' : `ends ${new Date(g.date).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}`) : ''}</span>
                       </div>
                       <div className="mt-1.5 flex gap-[2px]" aria-hidden="true">
-                        {Array.from({ length: 40 }, (_, i) => <i key={i} className={`h-2.5 flex-1 rounded-[1px] ${i < lit ? 'bg-ink' : 'bg-hairline'}`} />)}
+                        {Array.from({ length: 40 }, (_, i) => <i key={i} className={`h-2.5 flex-1 rounded-[1px] ${i < lit ? 'ir-lit bg-ink' : 'bg-hairline'}`} style={{ '--i': i } as CSSProperties} />)}
                       </div>
                     </div>
                     <span className="w-10 shrink-0 text-right text-body-sm text-mute">{Math.round(p * 100)}%</span>

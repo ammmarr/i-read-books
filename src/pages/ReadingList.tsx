@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion } from 'motion/react'
@@ -263,8 +263,8 @@ export default function ReadingList() {
                       </div>
                     )}
                     <div className={`grid grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-4 md:grid-cols-5 ${sel && !mobile ? 'xl:grid-cols-6' : 'lg:grid-cols-6 xl:grid-cols-7'}`}>
-                      {g.items.map((b) => (
-                        <CoverItem key={b.id} book={b} sessions={sessions} selected={sel?.id === b.id} onPick={() => pick(b.id)} />
+                      {g.items.map((b, i) => (
+                        <CoverItem key={b.id} order={i} book={b} sessions={sessions} selected={sel?.id === b.id} onPick={() => pick(b.id)} />
                       ))}
                     </div>
                   </section>
@@ -272,7 +272,7 @@ export default function ReadingList() {
               )}
             </div>
             {sel && !mobile && (
-              <aside className="sticky top-4 rounded-md border border-hairline bg-canvas-elevated p-5">
+              <aside key={sel.id} className="ir-slide sticky top-4 rounded-md border border-hairline bg-canvas-elevated p-5">
                 <Detail book={sel} sessions={sessions} pph={pph} onClose={() => setSelId(null)} />
               </aside>
             )}
@@ -288,7 +288,7 @@ export default function ReadingList() {
   )
 }
 
-function CoverItem({ book, sessions, selected, onPick }: { book: Book; sessions: Session[]; selected: boolean; onPick: () => void }) {
+function CoverItem({ book, sessions, selected, onPick, order = 0 }: { book: Book; sessions: Session[]; selected: boolean; onPick: () => void; order?: number }) {
   const reading = book.status === 'reading'
   const p = bookProgress(book)
   const noFile = book.pageCount === 0
@@ -298,7 +298,7 @@ function CoverItem({ book, sessions, selected, onPick }: { book: Book; sessions:
     meta = `${Math.round(p * 100)}%${g.date != null ? ` · ends ${g.days === 0 ? 'today' : shortDate(g.date)}` : ''}`
   } else meta = noFile ? (book.estPages ? `${book.estPages} pages · no PDF yet` : 'No PDF yet') : `${book.pageCount} pages`
   return (
-    <button onClick={onPick} className="group min-w-0 text-left">
+    <button onClick={onPick} className="ir-rise group min-w-0 text-left" style={{ '--i': order } as CSSProperties}>
       <div className={`relative rounded-[3px] transition-transform duration-200 group-hover:-translate-y-[3px] ${noFile ? 'outline-dashed outline-1 outline-offset-[3px] outline-faint/50' : ''}`}>
         <div className={`overflow-hidden rounded-[3px] shadow-cover transition-shadow ${selected ? 'ring-[1.5px] ring-ink' : ''}`}>
           <BookCover book={book} rounded="rounded-[3px]" />
@@ -306,7 +306,7 @@ function CoverItem({ book, sessions, selected, onPick }: { book: Book; sessions:
       </div>
       {reading && (
         <span className="mt-2 block h-[3px] overflow-hidden rounded-full bg-hairline" aria-hidden="true">
-          <i className="block h-full rounded-full bg-ink" style={{ width: `${Math.max(2, p * 100)}%` }} />
+          <i className="ir-grow-x block h-full rounded-full bg-ink" style={{ width: `${Math.max(2, p * 100)}%`, ['--d' as string]: `${300 + order * 45}ms` }} />
         </span>
       )}
       <div className="mt-2.5 truncate text-label-sm text-ink">{book.title}</div>

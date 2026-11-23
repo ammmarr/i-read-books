@@ -31,7 +31,7 @@ function Ticks({ value, n, height = 14 }: { value: number; n: number; height?: n
   return (
     <div className="flex gap-[2px]" aria-hidden="true">
       {Array.from({ length: n }, (_, i) => (
-        <i key={i} className={`flex-1 rounded-[1px] ${i < lit ? 'bg-ink' : 'bg-hairline'}`} style={{ height }} />
+        <i key={i} className={`flex-1 rounded-[1px] ${i < lit ? 'ir-lit bg-ink' : 'bg-hairline'}`} style={{ height, '--i': i } as CSSProperties} />
       ))}
     </div>
   )
@@ -125,8 +125,8 @@ export function TodayGauge({ sessions, reads }: { sessions: Session[]; reads: We
       {Array.from({ length: GAUGE_TICKS }, (_, i) => (
         <i
           key={i}
-          className={`absolute left-1/2 top-1/2 rounded-[2px] ${i < litBooks ? 'bg-ink' : i < litAll ? 'bg-mute' : 'bg-hairline'}`}
-          style={{ width: 4, height: 18, marginLeft: -2, transformOrigin: '50% 0', transform: `rotate(${-135 + (270 * i) / (GAUGE_TICKS - 1)}deg) translateY(-82px)` }}
+          className={`absolute left-1/2 top-1/2 rounded-[2px] ${i < litBooks ? 'ir-lit bg-ink' : i < litAll ? 'ir-lit bg-mute' : 'bg-hairline'}`}
+          style={{ width: 4, height: 18, marginLeft: -2, transformOrigin: '50% 0', transform: `rotate(${-135 + (270 * i) / (GAUGE_TICKS - 1)}deg) translateY(-82px)`, '--i': i } as CSSProperties}
         />
       ))}
       <div className="absolute inset-0 flex flex-col items-center justify-center">
@@ -343,6 +343,7 @@ export function Shelf({ books, sessions, filter, query, arrange, selected, onSel
                 ) : (
                   <SpineButton
                     key={slot.spine.book.id}
+                    order={si}
                     spine={slot.spine}
                     selected={slot.spine.book.id === selected}
                     dim={dim(slot.spine.book)}
@@ -373,7 +374,7 @@ export function Shelf({ books, sessions, filter, query, arrange, selected, onSel
   )
 }
 
-function SpineButton({ spine, selected, dim, queue, onPick }: { spine: Spine; selected: boolean; dim: boolean; queue: number; onPick: (id: string) => void }) {
+function SpineButton({ spine, selected, dim, queue, onPick, order = 0 }: { spine: Spine; selected: boolean; dim: boolean; queue: number; onPick: (id: string) => void; order?: number }) {
   const b = spine.book
   const progress = bookProgress(b)
   const style: CSSProperties = {
@@ -385,6 +386,7 @@ function SpineButton({ spine, selected, dim, queue, onPick }: { spine: Spine; se
     boxShadow: `${selected ? '0 0 0 1.5px var(--color-ink), ' : ''}inset -2px 0 0 rgba(0,0,0,.28), inset 2px 0 0 rgba(255,255,255,.07)`,
     // On your list without a PDF yet: a dashed edge.
     ...(b.pageCount === 0 ? { outline: '1px dashed currentColor', outlineOffset: -4 } : {}),
+    ['--i' as string]: order,
   }
   return (
     <button
@@ -393,7 +395,7 @@ function SpineButton({ spine, selected, dim, queue, onPick }: { spine: Spine; se
       aria-label={`${b.title}${b.author ? `, ${b.author}` : ''}${b.status === 'reading' ? `, ${Math.round(progress * 100)}% read` : b.status === 'queued' ? `, up next ${queue || ''}` : b.status === 'finished' ? ', finished' : ''}`}
       aria-pressed={selected}
       title={`${b.title}${b.author ? ` — ${b.author}` : ''}`}
-      className={`relative shrink-0 rounded-t-[2px] rounded-b-[1px] outline-none transition-[transform,opacity,box-shadow] duration-200 ease-[cubic-bezier(.2,0,0,1)] focus-visible:-translate-y-2 ${selected ? '-translate-y-4' : 'hover:-translate-y-2'}`}
+      className={`ir-spine relative shrink-0 rounded-t-[2px] rounded-b-[1px] outline-none transition-[transform,opacity,box-shadow] duration-200 ease-[cubic-bezier(.2,0,0,1)] focus-visible:-translate-y-2 ${selected ? '-translate-y-4' : 'hover:-translate-y-2'}`}
       style={style}
     >
       <span className="absolute inset-x-0 top-2 h-[2px] bg-current opacity-20" />

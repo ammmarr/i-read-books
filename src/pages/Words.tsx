@@ -105,9 +105,10 @@ export default function Words() {
             <p className="py-10 text-center text-body-md text-mute">No words match “{query}”.</p>
           ) : (
             <ul className="divide-y divide-hairline overflow-hidden rounded-md border border-hairline bg-canvas-elevated">
-              {shown.map((e) => (
+              {shown.map((e, i) => (
                 <WordRow
                   key={e.key}
+                  order={i}
                   entry={e}
                   titles={titles}
                   open={open === e.key}
@@ -123,11 +124,11 @@ export default function Words() {
   )
 }
 
-function WordRow({ entry: e, titles, open, onToggle, onRemove }: { entry: WordEntry; titles: Map<string, string>; open: boolean; onToggle: () => void; onRemove: () => void }) {
+function WordRow({ entry: e, titles, open, onToggle, onRemove, order = 0 }: { order?: number; entry: WordEntry; titles: Map<string, string>; open: boolean; onToggle: () => void; onRemove: () => void }) {
   const book = titles.get(e.latest.bookId)
   const otherBooks = e.bookIds.length - 1
   return (
-    <li>
+    <li className="ir-rise" style={{ '--i': order } as React.CSSProperties}>
       <button onClick={onToggle} aria-expanded={open} className="flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-hairline-soft/60 sm:px-5">
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
