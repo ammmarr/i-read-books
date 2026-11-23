@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { motion } from 'motion/react'
-import { Download, HardDrive, ListPlus, MonitorSmartphone, ShieldCheck, Upload } from 'lucide-react'
+import { AnimatePresence, motion } from 'motion/react'
+import { useSearchParams } from 'react-router'
+import { BookOpen, Download, HardDrive, Info, Link2, ListPlus, MonitorSmartphone, Palette, ShieldCheck, Upload, User } from 'lucide-react'
 import { PageContainer, PageHeader } from '../components/AppShell'
 import { Button } from '../components/ui/Button'
 import { Segmented } from '../components/ui/Segmented'
@@ -21,6 +22,8 @@ import { applyUpdate, checkForUpdate, useUpdate, versionLabel } from '../lib/upd
 import { Logo } from '../components/Logo'
 import { NightShiftSettings } from '../components/NightShift'
 
+type Section = 'account' | 'reading' | 'look' | 'connections' | 'data' | 'about'
+
 export default function SettingsPage() {
   const s = useSettings()
   const recap = useRecapPrefs()
@@ -29,6 +32,9 @@ export default function SettingsPage() {
   const [storage, setStorage] = useState<{ usage: number; quota: number; persisted: boolean } | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const { pickCsv } = useImporter()
+  const [params, setParams] = useSearchParams()
+  const section = (params.get('s') as Section | null) ?? 'reading'
+  const setSection = (k: Section) => setParams({ s: k }, { replace: true })
 
   const refreshStorage = async () => {
     const est = await navigator.storage?.estimate?.().catch(() => null)
@@ -39,32 +45,53 @@ export default function SettingsPage() {
     refreshStorage()
   }, [])
 
-  return (
-    <PageContainer className="max-w-[720px]">
-      <PageHeader eyebrow="Preferences" title="Settings" />
-
+  const sections: { key: Section; label: string; icon: typeof User; body: React.ReactNode }[] = [
+    ...(cloudEnabled ? [{ key: 'account' as Section, label: 'Account & sync', icon: User, body: (
+      <>
       {cloudEnabled && (
         <Group title="Account & sync" desc="Sign in to keep your PC and tablet in step.">
           <AccountSync />
         </Group>
       )}
 
+      </>
+    ) }] : []),
+    { key: 'reading', label: 'Reading', icon: BookOpen, body: (
+      <>
       <Group title="Daily goal" desc="How long you want to read each day. All your reading counts, books and the web alike. Your streak counts any day with at least a minute of reading.">
         <DailyGoal />
       </Group>
 
-      <Group title="I read extension" desc="A small Chrome extension counts the time you actively read on the web — Substack, X articles and any page you turn it on for — and adds it here, toward your daily goal.">
-        <SubstackSettings />
+      <Group title="Reading">
+        <Toggle
+          label="Welcome screen"
+          hint="When you open I read: one of your highlights in its page, and how your reading is going."
+          checked={s.welcomeScreen}
+          onChange={(v) => updateSettings({ welcomeScreen: v })}
+        />
+        <Toggle label="Hide controls while reading" hint="Scroll up or tap the page to bring them back" checked={s.autoHideChrome} onChange={(v) => updateSettings({ autoHideChrome: v })} />
+        <Toggle label="Keep screen on" hint="Stops your tablet from dimming mid-chapter" checked={s.keepAwake} onChange={(v) => updateSettings({ keepAwake: v })} />
+        <Toggle label="Show the reading clock" hint="In the reader’s island at the bottom, with a pause button" checked={s.showSessionTimer} onChange={(v) => updateSettings({ showSessionTimer: v })} />
+        <Toggle
+          label="Chapter recaps"
+          hint="After each chapter, recall it with three quick questions. Your answers are kept on each book’s page, on all your devices."
+          checked={recap.enabled}
+          onChange={setRecapsEnabled}
+        />
+        {recap.enabled && (
+          <Toggle
+            label="Also after each section"
+            hint="Recall each part of a chapter too, as you finish it — short and easy to pass on."
+            checked={recap.sections}
+            onChange={setSectionRecaps}
+          />
+        )}
       </Group>
 
-      <Group title="Sharing" desc="Post a highlighted quote on X or as a Substack Note — from the Share button next to the highlight colours.">
-        <SharingSettings />
-      </Group>
-
-      <Group title="AIGP" desc="Connect your habit tracker: it marks Read done for the day once your reading reaches its goal.">
-        <AigpSettings />
-      </Group>
-
+      </>
+    ) },
+    { key: 'look', label: 'Appearance', icon: Palette, body: (
+      <>
       <Group title="Appearance">
         <Row label="App theme">
           <Segmented
@@ -96,46 +123,26 @@ export default function SettingsPage() {
         </div>
       </Group>
 
-      <Group title="Reading">
-        <Toggle
-          label="Welcome screen"
-          hint="When you open I read: one of your highlights in its page, and how your reading is going."
-          checked={s.welcomeScreen}
-          onChange={(v) => updateSettings({ welcomeScreen: v })}
-        />
-        <Toggle label="Hide controls while reading" hint="Scroll up or tap the page to bring them back" checked={s.autoHideChrome} onChange={(v) => updateSettings({ autoHideChrome: v })} />
-        <Toggle label="Keep screen on" hint="Stops your tablet from dimming mid-chapter" checked={s.keepAwake} onChange={(v) => updateSettings({ keepAwake: v })} />
-        <Toggle label="Show session timer" hint="A small clock in the reader’s top bar" checked={s.showSessionTimer} onChange={(v) => updateSettings({ showSessionTimer: v })} />
-        <Toggle
-          label="Chapter recaps"
-          hint="After each chapter, recall it with three quick questions. Your answers are kept on each book’s page, on all your devices."
-          checked={recap.enabled}
-          onChange={setRecapsEnabled}
-        />
-        {recap.enabled && (
-          <Toggle
-            label="Also after each section"
-            hint="Recall each part of a chapter too, as you finish it — short and easy to pass on."
-            checked={recap.sections}
-            onChange={setSectionRecaps}
-          />
-        )}
+      </>
+    ) },
+    { key: 'connections', label: 'Connections', icon: Link2, body: (
+      <>
+      <Group title="I read extension" desc="A small Chrome extension counts the time you actively read on the web — Substack, X articles and any page you turn it on for — and adds it here, toward your daily goal.">
+        <SubstackSettings />
       </Group>
 
-      {(available || !isStandalone()) && (
-        <Group title="Install" desc="Install I read to use it like a normal app — its own window, Start menu and taskbar on a PC (with “Open with I read” for PDFs), or your home screen on a tablet. Works fully offline.">
-          {available ? (
-            <Button onClick={async () => (await install()) && toast({ message: 'Installed', description: 'Find I read on your home screen.' })}>
-              <MonitorSmartphone className="size-4" /> Install app
-            </Button>
-          ) : (
-            <p className="text-body-md text-body">
-              In Chrome on Android, open the ⋮ menu and choose <span className="font-medium text-ink">Add to Home screen → Install</span>. On a PC, use the install icon at the right of the address bar.
-            </p>
-          )}
-        </Group>
-      )}
+      <Group title="Sharing" desc="Post a highlighted quote on X or as a Substack Note — from the Share button next to the highlight colours.">
+        <SharingSettings />
+      </Group>
 
+      <Group title="AIGP" desc="Connect your habit tracker: it marks Read done for the day once your reading reaches its goal.">
+        <AigpSettings />
+      </Group>
+
+      </>
+    ) },
+    { key: 'data', label: 'Your data', icon: HardDrive, body: (
+      <>
       <Group
         title="Your data"
         desc={
@@ -218,7 +225,66 @@ export default function SettingsPage() {
         </p>
       </Group>
 
-      <VersionFooter />
+      </>
+    ) },
+    { key: 'about', label: 'About', icon: Info, body: (
+      <>
+      {(available || !isStandalone()) && (
+        <Group title="Install" desc="Install I read to use it like a normal app — its own window, Start menu and taskbar on a PC (with “Open with I read” for PDFs), or your home screen on a tablet. Works fully offline.">
+          {available ? (
+            <Button onClick={async () => (await install()) && toast({ message: 'Installed', description: 'Find I read on your home screen.' })}>
+              <MonitorSmartphone className="size-4" /> Install app
+            </Button>
+          ) : (
+            <p className="text-body-md text-body">
+              In Chrome on Android, open the ⋮ menu and choose <span className="font-medium text-ink">Add to Home screen → Install</span>. On a PC, use the install icon at the right of the address bar.
+            </p>
+          )}
+        </Group>
+      )}
+
+        <VersionFooter />
+      </>
+    ) },
+  ]
+  const current = sections.find((x) => x.key === section) ?? sections.find((x) => x.key === 'reading')!
+
+  return (
+    <PageContainer className="max-w-[1040px]">
+      <PageHeader eyebrow="You" title="Settings" />
+      <div className="md:grid md:grid-cols-[210px_minmax(0,1fr)] md:items-start md:gap-7">
+        {/* The sections: a list beside the page on a computer, a row you can scroll on a phone. */}
+        <nav aria-label="Settings sections" className="-mx-4 mb-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] md:sticky md:top-6 md:mx-0 md:mb-0 md:flex-col md:gap-0.5 md:overflow-visible md:px-0">
+          {sections.map((x) => {
+            const on = x.key === current.key
+            const Icon = x.icon
+            return (
+              <button
+                key={x.key}
+                onClick={() => setSection(x.key)}
+                aria-current={on ? 'page' : undefined}
+                className={`relative flex h-9 shrink-0 items-center gap-2.5 whitespace-nowrap rounded-sm px-3 text-label-sm transition-colors ${on ? 'text-ink' : 'text-body hover:bg-hairline-soft hover:text-ink'}`}
+              >
+                {on && <motion.span layoutId="settings-pill" className="absolute inset-0 -z-10 rounded-sm border border-hairline bg-canvas-elevated" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+                <Icon className="size-4 shrink-0" />
+                {x.label}
+              </button>
+            )
+          })}
+        </nav>
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={current.key}
+            initial={{ opacity: 0, x: 10 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -6, transition: { duration: 0.12 } }}
+            transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+            className="min-w-0"
+          >
+            {current.body}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </PageContainer>
   )
 }
