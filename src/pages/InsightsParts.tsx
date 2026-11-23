@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { RotateCw, TrendingUp } from 'lucide-react'
 import type { Book, HighlightColor, Session } from '../db/db'
@@ -75,8 +75,9 @@ export function Hero({ said, stats, aside }: { said: Said; stats: { label: strin
 
 // ── Time reading: the average as a line, each day (week, month) as a bar ─
 
-const STEPS = [5, 10, 15, 20, 30, 60, 120, 180, 300, 600, 1200, 1800, 3000, 6000]
-const tick = (m: number) => (m >= 120 ? `${Math.round(m / 60)}h` : `${Math.round(m)}m`)
+/** Grid steps in minutes: lines land on round numbers (2h, 4h, 6h…), never 90m or 4.5h. */
+const STEPS = [5, 10, 15, 20, 30, 60, 120, 180, 240, 300, 600, 1200, 1800, 3000, 6000, 12000]
+const tick = (m: number) => (m < 60 ? `${Math.round(m)}m` : m % 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${m / 60}h`)
 
 function smooth(pts: [number, number][], H: number) {
   if (!pts.length) return ''
@@ -104,26 +105,50 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
   before: string
 }) {
   const n = buckets.length
+  const mobile = useIsMobile()
+  // Nothing is picked until you point at (or tap) a bar: the details only show then.
   const [hover, setHover] = useState<number | null>(null)
-  const h = hover ?? n - 1
+  const plot = useRef<HTMLDivElement>(null)
+  // A tap anywhere else puts the details away again (on a phone there's no pointer to move off).
+  useEffect(() => {
+    if (hover == null) return
+    const away = (e: globalThis.PointerEvent) => { if (!plot.current?.contains(e.target as Node)) setHover(null) }
+    document.addEventListener('pointerdown', away)
+    return () => document.removeEventListener('pointerdown', away)
+  }, [hover])
   const mins = buckets.map((b) => b.seconds / 60)
   const win = grain === 'day' ? 7 : grain === 'week' ? 4 : 3
+  // The day (week, month) you're in isn't over: its bar reads "so far", and the average
+  // line stops at the last full one, so a half-done week doesn't drag the line down.
+  const live = n > 1 && buckets[n - 1].isCurrent ? n - 1 : -1
   const avg = mins.map((_, i) => {
-    const w = mins.slice(Math.max(0, i - win + 1), i + 1)
-    return w.reduce((a, b) => a + b, 0) / w.length
+    const hi = i === live ? i : i + 1
+    const w = mins.slice(Math.max(0, hi - win), hi)
+    return w.length ? w.reduce((a, b) => a + b, 0) / w.length : 0
   })
-  const raw = Math.max(1, ...mins, goal / 60)
-  const step = STEPS.find((s) => raw / s <= 4) ?? 12000
+  // Room above the goal line for its label.
+  const raw = Math.max(1, ...mins, (goal / 60) * 1.08)
+  const step = STEPS.find((s) => raw / s <= 5) ?? 24000
   const top = step * Math.ceil(raw / step)
+  const grid = Array.from({ length: Math.round(top / step) + 1 }, (_, k) => k * step)
   const W = 600, H = 160
-  const pts = avg.map((m, i): [number, number] => [n > 1 ? (i / (n - 1)) * W : W / 2, H - (m / top) * H])
+  // Every bar sits in the middle of its column, and so does its point on the line.
+  const at = (i: number) => ((i + 0.5) / n) * 100
+  const pts = avg.slice(0, live >= 0 ? live : n).map((m, i): [number, number] => [(at(i) / 100) * W, H - (m / top) * H])
   const line = smooth(pts, H)
-  const left = n > 1 ? (h / (n - 1)) * 100 : 50
+  const area = pts.length > 1 ? `${line} L${pts[pts.length - 1][0].toFixed(1)},${H} L${pts[0][0].toFixed(1)},${H} Z` : ''
   const marks = [...new Set([0, 1, 2, 3, 4].map((k) => Math.round((k * (n - 1)) / 4)))]
-  const unit = grain === 'day' ? 'That day' : grain === 'week' ? 'That week' : 'That month'
+  const b = hover != null ? buckets[hover] : null
+  const left = hover != null ? at(hover) : 0
+  const word = grain === 'day' ? 'day' : grain === 'week' ? 'week' : 'month'
+  const unit = hover === live ? (grain === 'day' ? 'Today so far' : `This ${word} so far`) : `That ${word}`
   const avgLabel = grain === 'day' ? '7-day average' : grain === 'week' ? '4-week average' : '3-month average'
-  const b = buckets[h]
-  if (!b) return null
+  const goalLabel = `${formatDuration(goal, { short: true })} a ${grain === 'week' ? 'week' : 'day'}`
+  const pick = (i: number) => (e: ReactPointerEvent) => {
+    if (e.pointerType === 'mouse') return
+    setHover((x) => (x === i ? null : i))
+  }
+  if (!n) return null
   return (
     <Card className="!pb-4">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
@@ -133,48 +158,57 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
         </div>
         {change != null && change > 0.005 && <Up text={`${(change * 100).toFixed(change < 0.1 ? 1 : 0)}% over ${before}`} />}
       </div>
-      <div className="relative ml-10 h-[200px]" onMouseLeave={() => setHover(null)}>
-        {[1, 0.75, 0.5, 0.25, 0].map((f) => (
-          <div key={f} className="absolute inset-x-0 border-t border-dashed border-hairline" style={{ top: `${(1 - f) * 100}%` }}>
-            <span className="absolute -left-10 w-8 -translate-y-1/2 text-right text-[11px] text-faint">{f ? tick(top * f) : '0'}</span>
+      <div ref={plot} className="relative ml-10 h-[200px]" onPointerLeave={(e) => e.pointerType === 'mouse' && setHover(null)}>
+        {grid.map((m) => (
+          <div key={m} className="absolute inset-x-0 border-t border-dashed border-hairline" style={{ top: `${(1 - m / top) * 100}%` }}>
+            <span className="absolute -left-10 w-8 -translate-y-1/2 text-right text-[11px] text-faint">{m ? tick(m) : '0'}</span>
           </div>
         ))}
         <div className="absolute inset-0 flex" aria-hidden="true">
           {mins.map((m, i) => (
             <div key={i} className="flex h-full flex-1 items-end justify-center">
-              <i className={`w-[46%] rounded-t-[2px] ${i === h ? 'bg-mute' : 'bg-hairline'}`} style={{ height: `${Math.max(1, (m / top) * 100)}%` }} />
+              <i
+                className={`w-[46%] rounded-t-[2px] transition-colors ${i === hover ? 'bg-mute' : i === live ? 'bg-hairline/50' : 'bg-hairline'}`}
+                style={{ height: `${Math.max(1, (m / top) * 100)}%` }}
+              />
             </div>
           ))}
         </div>
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="absolute inset-0 size-full overflow-visible" aria-hidden="true">
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="pointer-events-none absolute inset-0 size-full overflow-visible" aria-hidden="true">
           <defs>
             <linearGradient id="insights-area" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0" stopColor="var(--color-ink)" stopOpacity="0.1" />
               <stop offset="1" stopColor="var(--color-ink)" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {n > 1 && <path d={`${line} L${W},${H} L0,${H} Z`} fill="url(#insights-area)" />}
-          <path d={line} fill="none" stroke="var(--color-body)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+          {area && <path d={area} fill="url(#insights-area)" />}
+          {pts.length > 1 && <path d={line} fill="none" stroke="var(--color-body)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />}
         </svg>
         {goal > 0 && goal / 60 <= top && (
-          <div className="absolute inset-x-0 border-t border-dashed border-faint/60" style={{ top: `${(1 - goal / 60 / top) * 100}%` }}>
-            <span className="absolute left-1.5 -translate-y-[130%] text-[11px] text-mute">Goal {tick(goal / 60)}</span>
+          <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-faint/60" style={{ top: `${(1 - goal / 60 / top) * 100}%` }}>
+            <span className="absolute right-0 -translate-y-[130%] rounded-sm bg-canvas-elevated px-1 text-[11px] text-mute">Goal {goalLabel}</span>
           </div>
         )}
-        <div className="pointer-events-none absolute inset-y-0 w-px bg-hairline" style={{ left: `${left}%` }} />
-        <div className="pointer-events-none absolute size-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-canvas-elevated bg-ink" style={{ left: `${left}%`, top: `${(1 - avg[h] / top) * 100}%` }} />
-        <div
-          className="pointer-events-none absolute top-1.5 z-10 whitespace-nowrap rounded-[9px] border border-hairline bg-canvas-elevated px-3 py-2 text-body-sm shadow-floating"
-          style={{ left: `${left}%`, transform: left > 72 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)' }}
-        >
-          <div className="mb-1.5 font-medium text-ink">{b.title}</div>
-          <div className="flex justify-between gap-6"><span className="text-mute">{unit}</span><span className="font-medium text-ink">{b.seconds ? formatDuration(b.seconds) : 'No reading'}</span></div>
-          <div className="mt-0.5 flex justify-between gap-6"><span className="text-mute">{avgLabel}</span><span className="font-medium text-ink">{formatDuration(avg[h] * 60)}</span></div>
-          <div className="mt-0.5 flex justify-between gap-6"><span className="text-mute">Highlights</span><span className="font-medium text-ink">{highlights[h] ?? 0}</span></div>
-        </div>
+        {b && hover != null && (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 w-px bg-hairline" style={{ left: `${left}%` }} />
+            {hover !== live && pts[hover] && (
+              <div className="pointer-events-none absolute size-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-canvas-elevated bg-ink" style={{ left: `${left}%`, top: `${(1 - avg[hover] / top) * 100}%` }} />
+            )}
+            <div
+              className="pointer-events-none absolute top-1.5 z-10 whitespace-nowrap rounded-[9px] border border-hairline bg-canvas-elevated px-3 py-2 text-body-sm shadow-floating"
+              style={{ left: `${left}%`, transform: left > 62 ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)' }}
+            >
+              <div className="mb-1.5 font-medium text-ink">{b.title}</div>
+              <div className="flex justify-between gap-6"><span className="text-mute">{unit}</span><span className="font-medium text-ink">{b.seconds ? formatDuration(b.seconds) : 'No reading'}</span></div>
+              <div className="mt-0.5 flex justify-between gap-6"><span className="text-mute">{avgLabel}</span><span className="font-medium text-ink">{formatDuration(avg[hover] * 60)}</span></div>
+              <div className="mt-0.5 flex justify-between gap-6"><span className="text-mute">Highlights</span><span className="font-medium text-ink">{highlights[hover] ?? 0}</span></div>
+            </div>
+          </>
+        )}
         <div className="absolute inset-0 flex">
           {buckets.map((x, i) => (
-            <div key={x.key} className="h-full flex-1" onMouseEnter={() => setHover(i)} onClick={() => setHover(i)} />
+            <div key={x.key} className="h-full flex-1" onPointerEnter={(e) => e.pointerType === 'mouse' && setHover(i)} onPointerDown={pick(i)} />
           ))}
         </div>
       </div>
@@ -183,17 +217,19 @@ export function TimeChart({ buckets, grain, goal, highlights, total, change, bef
           <span
             key={i}
             className="absolute top-1.5 -translate-x-1/2 whitespace-nowrap text-[11.5px] text-mute transition-opacity"
-            style={{ left: `${n > 1 ? (i / (n - 1)) * 100 : 50}%`, opacity: Math.abs(i - h) <= Math.max(1, n / 10) ? 0 : 1 }}
+            style={{ left: `${at(i)}%`, opacity: hover != null && Math.abs(at(i) - at(hover)) < (mobile ? 22 : 14) ? 0 : 1 }}
           >
             {buckets[i].label}
           </span>
         ))}
-        <span
-          className="absolute top-0 h-[26px] whitespace-nowrap rounded-full bg-ink px-3 text-[12px] font-medium leading-[26px] text-canvas"
-          style={{ left: `${left}%`, transform: `translateX(${left > 94 ? '-88%' : left < 6 ? '-12%' : '-50%'})` }}
-        >
-          {b.label}
-        </span>
+        {b && (
+          <span
+            className="absolute top-0 h-[26px] whitespace-nowrap rounded-full bg-ink px-3 text-[12px] font-medium leading-[26px] text-canvas"
+            style={{ left: `${left}%`, transform: `translateX(${left > 94 ? '-88%' : left < 6 ? '-12%' : '-50%'})` }}
+          >
+            {b.label}
+          </span>
+        )}
       </div>
     </Card>
   )
@@ -336,6 +372,14 @@ const COLOURS: { key: HighlightColor; name: string }[] = [
   { key: 'purple', name: 'Purple' },
 ]
 
+/** The book's own colour when it has one, with a letter that reads on it; otherwise its paper. */
+function tileColours(tint: string | undefined, paper: { bg: string; ink: string }) {
+  if (!tint || !/^#[0-9a-f]{6}$/i.test(tint) || tint.toLowerCase() === '#e5e5e5') return { background: paper.bg, color: paper.ink }
+  const n = parseInt(tint.slice(1), 16)
+  const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255
+  return { background: tint, color: lum > 0.6 ? '#141414' : '#f2f2f2' }
+}
+
 function Kpi({ label, value, change, sub }: { label: string; value: string; change: ReactNode; sub: string }) {
   return (
     <Card>
@@ -430,7 +474,7 @@ export function HighlightsSection({ marks, books, shares, start, end, prev, buck
                   disabled={!b}
                   className="grid w-full grid-cols-[28px_minmax(0,1fr)_40px] items-center gap-3 py-2 text-left disabled:cursor-default"
                 >
-                  <span className="grid size-7 place-items-center rounded-[6px] text-[11px] font-semibold" style={b ? { background: b.tint && b.tint !== '#e5e5e5' ? b.tint : paper!.bg, color: paper!.ink } : undefined}>
+                  <span className="grid size-7 place-items-center rounded-[6px] text-[11px] font-semibold" style={b ? tileColours(b.tint, paper!) : undefined}>
                     {b ? m.title.slice(0, 1) : <span className="text-mute">W</span>}
                   </span>
                   <span className="min-w-0">

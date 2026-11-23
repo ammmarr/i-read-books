@@ -139,6 +139,8 @@ export function buckets(range: RangeKey, sessions: Session[], now = Date.now(), 
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7))
     cursor = d.getTime()
   }
+  // Over more than a year the same month comes round twice: say which year.
+  const longSpan = end - start > 366 * 86_400_000
   while (cursor < end) {
     let next: number
     let label: string
@@ -156,7 +158,7 @@ export function buckets(range: RangeKey, sessions: Session[], now = Date.now(), 
       const n = new Date(cursor)
       n.setMonth(n.getMonth() + 1, 1)
       next = n.getTime()
-      label = d.toLocaleDateString(undefined, { month: 'short' })
+      label = d.toLocaleDateString(undefined, longSpan ? { month: 'short', year: '2-digit' } : { month: 'short' })
       title = d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
     }
     let seconds = 0
