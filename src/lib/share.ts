@@ -36,6 +36,44 @@ export function openXPost(text: string) {
   window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}`, '_blank', 'noopener,noreferrer')
 }
 
+// ── Quotes you shared (kept on this device, for Insights) ─────────────────
+
+const SHARES_KEY = 'irb-shares'
+export interface ShareLog {
+  at: number
+  to: 'x' | 'substack'
+  /** The quote itself, without the quotation marks or the byline. */
+  text: string
+  title?: string
+}
+
+export function readShares(): ShareLog[] {
+  try {
+    const v = JSON.parse(localStorage.getItem(SHARES_KEY) || '[]')
+    return Array.isArray(v) ? v : []
+  } catch {
+    return []
+  }
+}
+
+/** Note a quote you shared. A Note's text is taken apart again: “quote” — Author, Title. */
+export function logShare(to: ShareLog['to'], text: string, title?: string) {
+  let quote = text
+  let from = title
+  const by = quote.lastIndexOf('\n\n— ')
+  if (by > 0) {
+    if (!from) from = quote.slice(by + 4).split(', ').pop()?.trim()
+    quote = quote.slice(0, by)
+  }
+  quote = clean(quote).replace(/^“|”$/g, '')
+  if (!quote) return
+  try {
+    localStorage.setItem(SHARES_KEY, JSON.stringify([...readShares(), { at: Date.now(), to, text: quote.slice(0, 600), title: from }].slice(-500)))
+  } catch {
+    /* full or blocked: Insights just won't count this one */
+  }
+}
+
 // ── The Chrome extension, as seen from the app ───────────────────────────
 // Its content script (only on this site) answers "ping" with "hello".
 interface Ext {

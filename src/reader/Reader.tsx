@@ -19,7 +19,7 @@ import { PageView, type PageHit } from './PageView'
 import { DocText, findInPage, normalizeQuery, snippet, type Match } from './textIndex'
 import { HighlightPopover, SelectionToolbar, HL_COLORS, type ShareTo } from './HighlightTools'
 import { SubstackNoteSheet } from '../components/ShareQuote'
-import { noteText, openXPost, xPostText } from '../lib/share'
+import { logShare, noteText, openXPost, xPostText } from '../lib/share'
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { wordFrom } from '../lib/dictionary'
 import { placeOf, wordAtPoint } from './wordAt'
@@ -1368,8 +1368,10 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
   const shareQuote = useCallback(
     (text: string, to: ShareTo) => {
       if (!text.trim()) return
-      if (to === 'x') openXPost(xPostText(text, book))
-      else setNoteDraft(noteText(text, book))
+      if (to === 'x') {
+        openXPost(xPostText(text, book))
+        logShare('x', text, book.title)
+      } else setNoteDraft(noteText(text, book))
     },
     [book],
   )

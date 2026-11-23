@@ -1,28 +1,23 @@
 import { useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { motion } from 'motion/react'
-import { ArrowDownRight, ArrowUpRight, BookOpen, ChartColumn, Table2 } from 'lucide-react'
+import { ArrowRight, BookOpen } from 'lucide-react'
 import { db, type Book, type Session, type WebRead } from '../db/db'
-import { bookProgress } from '../db/books'
 import { PageContainer, PageHeader } from '../components/AppShell'
-import { BookCover } from '../components/BookCover'
-import { BarChart, type BarDatum } from '../components/charts/BarChart'
-import { Heatmap } from '../components/charts/Heatmap'
 import { Button } from '../components/ui/Button'
-import { ProgressBar } from '../components/ui/Progress'
 import { Segmented } from '../components/ui/Segmented'
-import { Monogram } from './LibrarySubstack'
+import { TodayGauge } from './LibraryShelf'
+import { Card, CommitGraph, Hero, HighlightsSection, InsightsCard, TimeChart, YearAndBooks, type Insight, type Said } from './InsightsParts'
+import { marksOf } from '../lib/marks'
 import { dailyGoal, useSettings } from '../lib/settings'
-import { articlesOf, newslettersOf, useAllReading } from '../lib/web'
-import { useCountUp } from '../lib/hooks'
-import { compact, formatDate, formatDuration, formatDurationLong, pluralize } from '../lib/format'
-import {
-  PACE_DAYS, RANGES, addDays, bookStats, buckets, dailyTotals, daysTaken, finishGuesses, finishedBooks, heatmap, hourOfDay, onTrackFor, previousWindow, rangeStart,
-  startOfDay, streaks, summarize, type RangeKey,
-} from '../lib/stats'
+import { useAllReading } from '../lib/web'
+import { readShares } from '../lib/share'
+import { spoken } from '../lib/welcome'
+import { formatDuration, pluralize } from '../lib/format'
+import { RANGES, addDays, buckets, dailyTotals, dayKey, finishGuesses, finishedBooks, onTrackFor, previousWindow, rangeStart, startOfDay, streaks, summarize, type RangeKey } from '../lib/stats'
 
-/** All your reading — books and Substack — as one: one total, one goal, one colour. */
+/** All your reading — books and the web — as one: a sentence, the time, insights, a year of days, highlights & quotes, and your books. */
 export default function Stats() {
   const data = useAllReading()
   const books = useLiveQuery(() => db.books.toArray(), [])
@@ -61,10 +56,14 @@ export default function Stats() {
   )
 }
 
+const DAY = 86_400_000
+
 function Dashboard({ range, sessions, bookSessions, reads, books }: {
   range: RangeKey; sessions: Session[]; bookSessions: Session[]; reads: WebRead[]; books: Book[]
 }) {
+  const navigate = useNavigate()
   const goalMinutes = dailyGoal(useSettings())
+  const goal = goalMinutes * 60
   const now = Date.now()
   const start = rangeStart(range, sessions, now)
   const end = addDays(startOfDay(now), 1)
@@ -74,446 +73,134 @@ function Dashboard({ range, sessions, bookSessions, reads, books }: {
   const daily = useMemo(() => dailyTotals(sessions), [sessions])
   const st = useMemo(() => streaks(daily), [daily])
   const { grain, buckets: bs } = useMemo(() => buckets(range, sessions, now, start), [range, sessions, start]) // eslint-disable-line react-hooks/exhaustive-deps
-  const inRange = useMemo(() => sessions.filter((s) => s.start >= start && s.start < end), [sessions, start, end])
-  const hours = useMemo(() => hourOfDay(inRange), [inRange])
-  const heat = useMemo(() => heatmap(sessions, 53, goalMinutes * 60), [sessions, goalMinutes])
-  const [asTable, setAsTable] = useState(false)
-  const rangeLabel = RANGES.find((r) => r.key === range)!.long.toLowerCase()
+  const highlights = useLiveQuery(() => db.highlights.toArray(), [])
+  const web = useLiveQuery(() => db.webAnnotations.toArray(), [])
+  const marks = useMemo(() => marksOf(highlights ?? [], web ?? [], books), [highlights, web, books])
+  const shares = useMemo(() => readShares(), [])
+  const highlightsByBook = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const h of highlights ?? []) m.set(h.bookId, (m.get(h.bookId) ?? 0) + 1)
+    return m
+  }, [highlights])
 
-  const goalPerBucket = !goalMinutes ? 0 : grain === 'day' ? goalMinutes * 60 : grain === 'week' ? goalMinutes * 60 * 7 : 0
-  const peakHour = hours.indexOf(Math.max(...hours))
-  const totalHourSecs = hours.reduce((a, b) => a + b, 0)
-  /** Days in the range you reached your goal. */
+  const r = RANGES.find((x) => x.key === range)!
+  const inThe = range === 'all' ? 'since you started' : `in the ${r.long.toLowerCase()}`
+  const before = range === '1y' ? 'the year before' : `the ${r.long.toLowerCase().replace('last ', '')} before`
   const goalDays = useMemo(() => {
     let n = 0
     for (const [k, t] of daily) {
       const ts = new Date(`${k}T00:00:00`).getTime()
-      if (ts >= start && ts < end && goalMinutes > 0 && t.seconds >= goalMinutes * 60) n++
+      if (ts >= start && ts < end && goal > 0 && t.seconds >= goal) n++
     }
     return n
-  }, [daily, start, end, goalMinutes])
+  }, [daily, start, end, goal])
+  const current = books
+    .filter((b) => b.lastOpenedAt && b.status !== 'finished' && b.pageCount > 0)
+    .sort((a, b) => (b.lastOpenedAt ?? 0) - (a.lastOpenedAt ?? 0))[0]
 
-  // What you read: books and newsletters in one list, by the time you gave them.
-  const readsInRange = useMemo(() => reads.filter((r) => r.start >= start && r.start < end), [reads, start, end])
-  const letters = useMemo(() => newslettersOf(articlesOf(readsInRange)), [readsInRange])
-  const items = useMemo(() => {
-    const own = bookSessions.filter((s) => s.start >= start && s.start < end)
-    const ids = new Set(own.map((s) => s.bookId))
-    const pph = summarize(bookSessions, start, end).pagesPerHour
-    const bookItems = books
-      .filter((b) => ids.has(b.id))
-      .map((b) => ({
-        kind: 'book' as const,
-        key: b.id,
-        book: b,
-        seconds: own.filter((s) => s.bookId === b.id).reduce((a, s) => a + s.seconds, 0),
-        stats: bookStats(b, bookSessions, pph),
-      }))
-    const letterItems = letters.map((n) => ({ kind: 'letter' as const, key: `letter:${n.name}`, letter: n, seconds: n.seconds }))
-    return [...bookItems, ...letterItems].sort((a, b) => b.seconds - a.seconds)
-  }, [books, bookSessions, letters, start, end])
+  // ── The sentence ──
+  const said: Said = []
+  if (sum.seconds >= 60) {
+    said.push('You read ', { b: spoken(sum.seconds) }, ` ${inThe}`)
+    if (prev && prev.seconds > 0 && sum.seconds - prev.seconds >= 600) said.push(', ', { b: `${spoken(sum.seconds - prev.seconds)} more` }, ` than ${before}`)
+    said.push('.')
+  } else said.push(`Nothing read ${inThe} yet.`)
+  const next = finishGuesses(books, bookSessions).find((g) => g.date != null && (g.days ?? 0) <= 60)
+  if (next?.date != null) {
+    const d = new Date(next.date)
+    const when = next.days === 0 ? 'today' : next.days === 1 ? 'tomorrow' : (next.days ?? 99) <= 6 ? `this ${d.toLocaleDateString(undefined, { weekday: 'long' })}` : `on ${d.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`
+    said.push(' ', { b: next.book.title }, ' ends ', { b: when }, ' at your pace.')
+  }
+  const better = (a: number, b: number | undefined) =>
+    b && a > b * 1.005 ? <span className="text-body-sm font-normal text-success">↑ {Math.round(((a - b) / b) * 100)}%</span> : null
 
-  const chartData: BarDatum[] = bs.map((b) => ({ key: b.key, label: b.label, title: b.title, value: b.seconds / 60, isCurrent: b.isCurrent }))
-
-  return (
-    <div className="space-y-4">
-      {/* ── Headline ── */}
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,2fr)]">
-        <Card className="flex flex-col justify-between p-6">
-          <div className="text-mono-eyebrow text-mute">Time reading</div>
-          <div>
-            <Hero seconds={sum.seconds} />
-            <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-body-md text-mute">
-              {prev && <Delta now={sum.seconds} before={prev.seconds} />}
-              <span>{rangeLabel}</span>
-            </div>
-          </div>
-        </Card>
-        <div className="grid grid-cols-2 gap-4">
-          <Tile label="Daily average" value={formatDuration(sum.avgSecondsPerDay, { short: true })} sub={`${sum.activeDays} of ${sum.days} days read`} />
-          <Tile label="Goal reached" value={`${goalDays} ${goalDays === 1 ? 'day' : 'days'}`} sub={`of ${sum.days} · ${goalMinutes} min a day`} />
-          <Tile label="Current streak" value={`${st.current} ${st.current === 1 ? 'day' : 'days'}`} sub={`Best ${st.longest}`} />
-          <Tile label="Sessions" value={compact(sum.sessions)} sub={sum.sessions ? `avg ${formatDuration(sum.seconds / sum.sessions, { short: true })}` : undefined} />
-        </div>
-      </div>
-
-      <FinishingNext books={books} sessions={bookSessions} />
-      <BooksFinished books={books} sessions={bookSessions} />
-
-      {/* ── Time chart ── */}
-      <Card className="p-5 sm:p-6">
-        <div className="mb-6 flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-heading-md text-ink">Reading time</h2>
-            <p className="text-body-md text-mute">
-              Minutes per {grain}
-              {goalPerBucket ? ` · line marks your ${grain === 'day' ? 'daily' : 'weekly'} goal` : ''}
-            </p>
-          </div>
-          <Segmented
-            size="sm"
-            value={asTable ? 'table' : 'chart'}
-            onChange={(v) => setAsTable(v === 'table')}
-            ariaLabel="View as"
-            options={[
-              { value: 'chart', label: <ChartColumn className="size-3.5" />, title: 'Chart' },
-              { value: 'table', label: <Table2 className="size-3.5" />, title: 'Table' },
-            ]}
-          />
-        </div>
-        {asTable ? (
-          <div className="max-h-[260px] overflow-y-auto">
-            <table className="w-full text-body-md">
-              <thead className="sticky top-0 bg-canvas-elevated text-left text-body-sm text-mute">
-                <tr>
-                  <th className="py-2 font-medium">Period</th>
-                  <th className="py-2 text-right font-medium">Time</th>
-                </tr>
-              </thead>
-              <tbody className="tabular">
-                {[...bs].reverse().map((b) => (
-                  <tr key={b.key} className="border-t border-hairline">
-                    <td className="py-2 text-ink">{b.title}</td>
-                    <td className="py-2 text-right text-body">{formatDuration(b.seconds)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <BarChart
-            ariaLabel={`Reading minutes per ${grain}, ${rangeLabel}`}
-            data={chartData}
-            format={(m) => formatDurationLong(m * 60)}
-            tick={(m) => (m >= 120 ? `${Math.round(m / 60)}h` : `${Math.round(m)}m`)}
-            goal={goalPerBucket ? { value: goalPerBucket / 60, label: `Goal ${formatDuration(goalPerBucket, { short: true })}` } : undefined}
-          />
-        )}
-      </Card>
-
-      {/* ── Consistency ── */}
-      <Card className="p-5 sm:p-6">
-        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h2 className="text-heading-md text-ink">Consistency</h2>
-            <p className="text-body-md text-mute">
-              Each square is a day. {goalMinutes ? `Darker means closer to — or past — your ${goalMinutes}-minute goal.` : 'Darker means more reading.'}
-            </p>
-          </div>
-          <div className="flex gap-6 text-right">
-            <MiniStat label="Current streak" value={`${st.current}d`} />
-            <MiniStat label="Longest" value={`${st.longest}d`} />
-          </div>
-        </div>
-        <Heatmap cols={heat} />
-      </Card>
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* ── Time of day ── */}
-        <Card className="p-5 sm:p-6">
-          <h2 className="text-heading-md text-ink">When you read</h2>
-          <p className="mb-6 text-body-md text-mute">
-            {totalHourSecs > 60 ? `Most often around ${hourLabel(peakHour, true)}.` : 'Read a little more to see your rhythm.'}
-          </p>
-          <BarChart
-            ariaLabel="Reading minutes by hour of day"
-            height={180}
-            labelEvery={6}
-            data={hours.map((s, h) => ({
-              key: String(h),
-              label: hourLabel(h),
-              title: `${hourLabel(h, true)} – ${hourLabel((h + 1) % 24, true)}`,
-              value: s / 60,
-            }))}
-            format={(m) => formatDurationLong(m * 60)}
-            tick={(m) => (m >= 120 ? `${Math.round(m / 60)}h` : `${Math.round(m)}m`)}
-          />
-        </Card>
-
-        {/* ── What you read ── */}
-        <Card className="p-5 sm:p-6">
-          <h2 className="text-heading-md text-ink">What you read</h2>
-          <p className="mb-4 text-body-md text-mute">Where your time went, {rangeLabel}.</p>
-          <ul className="-mx-2 space-y-1">
-            {items.slice(0, 8).map((it, i) => (
-              <motion.li key={it.key} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                {it.kind === 'book' ? (
-                  <Link to={`/book/${it.book.id}`} className="flex items-center gap-3 rounded-sm px-2 py-2 transition-colors hover:bg-hairline-soft">
-                    <div className="w-8 shrink-0 rounded-[2px] shadow-cover">
-                      <BookCover book={it.book} rounded="rounded-[2px]" />
-                    </div>
-                    <ItemBody
-                      title={it.book.title}
-                      seconds={it.seconds}
-                      share={items[0] ? it.seconds / items[0].seconds : 0}
-                      sub={`${Math.round(bookProgress(it.book) * 100)}% read${it.book.status === 'finished' ? ' · finished' : it.stats.remainingSeconds ? ` · ~${formatDurationLong(it.stats.remainingSeconds)} to go` : ''}`}
-                    />
-                  </Link>
-                ) : (
-                  <div className="flex items-center gap-3 rounded-sm px-2 py-2">
-                    <Monogram name={it.letter.name} size="sm" className="w-8 shrink-0" />
-                    <ItemBody title={it.letter.name} seconds={it.seconds} share={items[0] ? it.seconds / items[0].seconds : 0} sub={pluralize(it.letter.articles, 'article')} />
-                  </div>
-                )}
-              </motion.li>
-            ))}
-            {!items.length && <li className="px-2 py-6 text-center text-body-md text-mute">Nothing read {rangeLabel}.</li>}
-          </ul>
-        </Card>
-      </div>
-    </div>
-  )
-}
-
-/** When you'll finish each book you're reading, at your pace in it lately. */
-function FinishingNext({ books, sessions }: { books: Book[]; sessions: Session[] }) {
-  const guesses = useMemo(() => finishGuesses(books, sessions), [books, sessions])
-  if (!guesses.length) return null
-  return (
-    <Card className="p-5 sm:p-6">
-      <h2 className="text-heading-md text-ink">Finishing next</h2>
-      <p className="mb-3 text-body-md text-mute">When you’ll finish each book you’re reading, at your pace in it over the last {PACE_DAYS} days.</p>
-      <ul className="-mx-2">
-        {guesses.slice(0, 5).map((g) => (
-          <li key={g.book.id} className="border-t border-hairline">
-            <Link to={`/book/${g.book.id}`} className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-sm px-2 py-4 transition-colors hover:bg-hairline-soft">
-              <div className="flex min-w-0 flex-[999_1_320px] items-center gap-3.5">
-                <div className="w-10 shrink-0 rounded-[2px] shadow-cover">
-                  <BookCover book={g.book} rounded="rounded-[2px]" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-baseline gap-2">
-                    <span className="truncate text-label-sm text-ink">{g.book.title}</span>
-                    {g.book.author && <span className="hidden truncate text-body-sm text-mute sm:inline">{g.book.author}</span>}
-                  </div>
-                  <ProgressBar value={g.progress} thin className="mt-1.5" />
-                  <div className="mt-1 text-body-sm tabular text-mute">
-                    {Math.round(g.progress * 100)}% · {g.pagesRead} of {g.book.pageCount} pages
-                  </div>
-                </div>
-              </div>
-              <div className="flex-[1_1_260px] sm:text-right">
-                {g.date != null ? (
-                  <>
-                    <div className="text-heading-md tabular text-ink">{formatDate(g.date)}</div>
-                    <div className="text-body-sm text-mute">
-                      {g.days === 0 ? 'Every page read' : `in ${pluralize(g.days ?? 0, 'day')} · about ${formatDurationLong(g.secondsPerDay)} a day here`}
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="text-body-md text-body">Read a little more to see a date</div>
-                    <div className="text-body-sm text-mute">
-                      {g.activeDays === 0 ? `Not opened in the last ${PACE_DAYS} days` : `Read on ${pluralize(g.activeDays, 'day')} of the last ${PACE_DAYS}`}
-                    </div>
-                  </>
-                )}
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </Card>
-  )
-}
-
-/** Books you've finished: this year (and where that's heading) or all time. */
-function BooksFinished({ books, sessions }: { books: Book[]; sessions: Session[] }) {
-  const year = new Date().getFullYear()
-  const [scope, setScope] = useState<'year' | 'all'>('year')
-  const all = useMemo(() => finishedBooks(books), [books])
-  if (!all.length) return null
-
-  const inYear = all.filter((b) => new Date(b.finishedAt!).getFullYear() === year)
-  const list = scope === 'year' ? inYear : all
-  const onTrack = onTrackFor(inYear.length)
-  const taken = list.map((b) => daysTaken(b, sessions)).filter((d): d is number => d != null)
-  const avg = taken.length ? Math.round(taken.reduce((a, d) => a + d, 0) / taken.length) : null
-  const firstYear = new Date(all[all.length - 1].finishedAt!).getFullYear()
-  const bars =
-    scope === 'year'
-      ? Array.from({ length: 12 }, (_, m) => {
-          const d = new Date(year, m, 1)
-          return {
-            key: String(m),
-            label: d.toLocaleDateString(undefined, { month: 'narrow' }),
-            title: d.toLocaleDateString(undefined, { month: 'long' }),
-            n: inYear.filter((b) => new Date(b.finishedAt!).getMonth() === m).length,
-          }
-        })
-      : Array.from({ length: year - firstYear + 1 }, (_, i) => {
-          const y = firstYear + i
-          return { key: String(y), label: String(y), title: String(y), n: all.filter((b) => new Date(b.finishedAt!).getFullYear() === y).length }
-        })
-  const max = Math.max(1, ...bars.map((b) => b.n))
-  const dec31 = new Date(year, 11, 31).toLocaleDateString(undefined, { month: 'long', day: 'numeric' })
+  // ── Insights, worked out from your own numbers ──
+  const insights = useMemo(() => {
+    const out: Insight[] = []
+    const days = Math.round((end - start) / DAY)
+    if (days >= 14) {
+      let we = 0, wd = 0, nwe = 0, nwd = 0
+      for (let d = start; d < end; d = addDays(d, 1)) {
+        const s = daily.get(dayKey(d))?.seconds ?? 0
+        if ([0, 6].includes(new Date(d).getDay())) { we += s; nwe++ } else { wd += s; nwd++ }
+      }
+      const a = we / Math.max(1, nwe), b = wd / Math.max(1, nwd)
+      if (a > 0 && b > 0 && a / b >= 1.1) out.push({ a: 'You read ', b: `${Math.round((a / b - 1) * 100)}% more`, c: ' on weekends than on weekdays.' })
+      else if (a > 0 && b > 0 && b / a >= 1.1) out.push({ a: 'You read ', b: `${Math.round((b / a - 1) * 100)}% more`, c: ' on weekdays than at the weekend.' })
+    }
+    // Where you highlight most, for the pages you read there.
+    const pages = new Map<string, Set<number>>()
+    for (const s of bookSessions) if (s.start >= start && s.start < end) {
+      const set = pages.get(s.bookId) ?? new Set<number>()
+      s.pages.forEach((p) => set.add(p))
+      pages.set(s.bookId, set)
+    }
+    let dense: { title: string; every: number } | null = null
+    for (const b of books) {
+      const n = marks.filter((m) => m.from === b.id && m.at >= start && m.at < end).length
+      const p = pages.get(b.id)?.size ?? 0
+      if (n >= 5 && p >= 10 && (!dense || p / n < dense.every)) dense = { title: b.title, every: p / n }
+    }
+    if (dense) out.push({ a: 'You highlight most in ', b: dense.title, c: `: one highlight every ${pluralize(Math.max(1, Math.round(dense.every)), 'page')}.` })
+    let best = { d: 0, s: 0 }
+    for (let d = start; d < end; d = addDays(d, 1)) {
+      const s = daily.get(dayKey(d))?.seconds ?? 0
+      if (s > best.s) best = { d, s }
+    }
+    if (best.s >= 30 * 60) out.push({ a: 'Your best day was ', b: new Date(best.d).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }), c: `: ${spoken(best.s)}.` })
+    if (st.current >= 3) out.push({ a: '', b: `${st.current} days in a row`, c: st.longest > st.current ? ` now; your best is ${st.longest}.` : ' now, your longest yet.' })
+    const done = books.filter((b) => b.status === 'finished' && b.finishedAt && b.finishedAt >= start && b.finishedAt < end)
+    if (done.length) out.push({ a: 'You finished ', b: pluralize(done.length, 'book'), c: ` ${inThe}${done.length === 1 ? `: ${done[0].title}` : ''}.` })
+    const year = finishedBooks(books, new Date().getFullYear()).length
+    const track = onTrackFor(year)
+    if (track && track > year) out.push({ a: 'At this pace you’ll finish ', b: pluralize(track, 'book'), c: ' this year.' })
+    const sh = shares.filter((s) => s.at >= start && s.at < end && s.title)
+    if (sh.length >= 3) {
+      const by = new Map<string, number>()
+      for (const s of sh) by.set(s.title!, (by.get(s.title!) ?? 0) + 1)
+      const [title, k] = [...by.entries()].sort((a, b) => b[1] - a[1])[0]
+      out.push({ a: 'The quotes you share come mostly from ', b: title, c: `: ${k} of ${sh.length}.` })
+    }
+    return out
+  }, [start, end, daily, bookSessions, books, marks, st, inThe, shares])
 
   return (
-    <Card className="p-5 sm:p-6">
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-heading-md text-ink">Books finished</h2>
-        <Segmented
-          size="sm"
-          value={scope}
-          onChange={setScope}
-          ariaLabel="Which books"
-          options={[
-            { value: 'year', label: String(year) },
-            { value: 'all', label: 'All time' },
-          ]}
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
+      <Hero
+        said={said}
+        stats={[
+          { label: 'Daily average', value: formatDuration(sum.avgSecondsPerDay, { short: true }), extra: better(sum.avgSecondsPerDay, prev?.avgSecondsPerDay) },
+          { label: 'Goal reached', value: goal ? `${goalDays} of ${pluralize(sum.days, 'day')}` : 'No goal set' },
+          { label: 'Streak', value: pluralize(st.current, 'day'), extra: st.longest > st.current ? <span className="text-body-sm font-normal text-mute">best {st.longest}</span> : null },
+          { label: 'Pages read', value: sum.pages.toLocaleString(), extra: better(sum.pages, prev?.pages) },
+        ]}
+        aside={
+          <>
+            <TodayGauge sessions={bookSessions} reads={reads} />
+            {current && (
+              <Button className="mt-1 w-[210px] max-w-full justify-center" onClick={() => navigate(`/read/${current.id}`)}>
+                <span className="truncate">Continue {current.title}</span> <ArrowRight className="size-4 shrink-0" />
+              </Button>
+            )}
+          </>
+        }
+      />
+      <div className="mt-7 grid gap-4 lg:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]">
+        <TimeChart
+          buckets={bs}
+          grain={grain}
+          goal={grain === 'day' ? goal : grain === 'week' ? goal * 7 : 0}
+          highlights={bs.map((b) => marks.filter((m) => m.at >= b.start && m.at < b.end).length)}
+          total={sum.seconds}
+          change={prev && prev.seconds > 0 ? (sum.seconds - prev.seconds) / prev.seconds : null}
+          before={before}
         />
+        <InsightsCard items={insights} />
       </div>
-
-      <div className="flex flex-wrap items-end gap-x-10 gap-y-6">
-        <div className="flex-[1_1_220px]">
-          <div className="flex items-baseline gap-2.5 text-ink">
-            <span className="text-[56px] font-semibold leading-none tracking-[-2.4px] tabular">{list.length}</span>
-            <span className="text-body-lg text-body">{list.length === 1 ? 'book' : 'books'} {scope === 'year' ? 'this year' : 'in all'}</span>
-          </div>
-          <p className="mt-3 text-body-md text-body">
-            {scope === 'year' && onTrack != null && onTrack > inYear.length && (
-              <>On track for <span className="font-semibold text-ink">{onTrack}</span> by {dec31}. </>
-            )}
-            {scope === 'year' && !inYear.length && <>None yet this year. Your last was {all[0].title}, on {formatDate(all[0].finishedAt!)}. </>}
-            {avg != null && (
-              <>A book takes you <span className="font-semibold text-ink">{pluralize(avg, 'day')}</span> on average.</>
-            )}
-          </p>
-        </div>
-        <div className="min-w-0 flex-[999_1_420px]">
-          <div
-            role="img"
-            aria-label={`Books finished per ${scope === 'year' ? 'month' : 'year'}: ${bars.map((b) => `${b.title} ${b.n}`).join(', ')}`}
-            className="grid h-24 items-end gap-1.5"
-            style={{ gridTemplateColumns: `repeat(${bars.length}, minmax(0, 1fr))` }}
-          >
-            {bars.map((b) => (
-              <div key={b.key} className="flex h-full flex-col items-center justify-end gap-1.5" title={`${b.title}: ${pluralize(b.n, 'book')}`}>
-                <motion.div
-                  className={`w-full max-w-7 rounded-[4px] ${b.n ? 'bg-seq-3' : 'bg-hairline-soft'}`}
-                  initial={{ height: 0 }}
-                  animate={{ height: b.n ? 12 + (b.n / max) * 64 : 4 }}
-                  transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-                />
-                <span className="text-[11px] leading-none text-mute">{b.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {list.length > 0 && (
-        <ul className="mt-7 grid grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-5 md:grid-cols-6 lg:grid-cols-8">
-          {list.slice(0, 12).map((b) => {
-            const d = daysTaken(b, sessions)
-            return (
-              <li key={b.id} className="min-w-0">
-                <Link to={`/book/${b.id}`} className="group block">
-                  <div className="rounded-[4px] shadow-cover transition-shadow duration-300 group-hover:shadow-cover-lift">
-                    <BookCover book={b} />
-                  </div>
-                  <div className="mt-2 line-clamp-2 text-label-sm text-ink">{b.title}</div>
-                  <div className="mt-0.5 text-body-sm text-mute">
-                    {formatDate(b.finishedAt!)}
-                    {d != null && ` · took ${pluralize(d, 'day')}`}
-                  </div>
-                </Link>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </Card>
-  )
-}
-
-/** A row of "What you read": its time, a bar for its share against the top one, and a detail line. */
-function ItemBody({ title, seconds, share, sub }: { title: string; seconds: number; share: number; sub: string }) {
-  return (
-    <div className="min-w-0 flex-1">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="truncate text-label-sm text-ink">{title}</span>
-        <span className="shrink-0 text-body-sm tabular text-body">{formatDuration(seconds, { short: true })}</span>
-      </div>
-      <ProgressBar value={share} thin className="mt-1.5" />
-      <div className="mt-1 truncate text-body-sm text-mute">{sub}</div>
-    </div>
-  )
-}
-
-/** "6am" on the axis, "6 am" in prose — follows the locale's 12/24h clock. */
-function hourLabel(h: number, long = false) {
-  const d = new Date()
-  d.setHours(h, 0, 0, 0)
-  const s = d.toLocaleTimeString(undefined, { hour: 'numeric' }).toLowerCase()
-  return long ? s : s.replace(/\s/g, '')
-}
-
-function Card({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-      className={`rounded-md border border-hairline bg-canvas-elevated ${className}`}
-    >
-      {children}
+      <CommitGraph daily={daily} goal={goal} streak={st} />
+      <HighlightsSection marks={marks} books={books} shares={shares} start={start} end={end} prev={prevW} buckets={bs} rangeLabel={r.long} before={before} />
+      <YearAndBooks daily={daily} goal={goal} books={books} sessions={bookSessions} highlightsByBook={highlightsByBook} />
     </motion.div>
-  )
-}
-
-function Hero({ seconds }: { seconds: number }) {
-  const v = useCountUp(seconds)
-  const h = Math.floor(v / 3600)
-  const m = Math.floor((v % 3600) / 60)
-  return (
-    <div className="mt-6 flex items-baseline gap-1.5 text-ink">
-      {h > 0 && (
-        <>
-          <span className="text-[56px] font-semibold leading-none tracking-[-2.8px]">{h}</span>
-          <span className="mr-2 text-heading-md text-mute">h</span>
-        </>
-      )}
-      <span className="text-[56px] font-semibold leading-none tracking-[-2.8px]">{m}</span>
-      <span className="text-heading-md text-mute">m</span>
-    </div>
-  )
-}
-
-function Delta({ now, before }: { now: number; before: number }) {
-  if (before <= 0 && now <= 0) return null
-  if (before <= 0) return <span className="inline-flex items-center gap-0.5 rounded-full bg-success/10 px-2 py-0.5 text-body-sm font-medium text-success"><ArrowUpRight className="size-3.5" />New</span>
-  const pct = Math.round(((now - before) / before) * 100)
-  const up = pct >= 0
-  return (
-    <span className={`inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-body-sm font-medium ${up ? 'bg-success/10 text-success' : 'bg-hairline-soft text-body'}`} title="Compared with the previous period">
-      {up ? <ArrowUpRight className="size-3.5" /> : <ArrowDownRight className="size-3.5" />}
-      {Math.abs(pct)}%
-    </span>
-  )
-}
-
-function Tile({ label, value, sub, delta }: { label: string; value: string; sub?: string; delta?: { now: number; before: number } }) {
-  return (
-    <Card className="flex flex-col justify-between p-4 sm:p-5">
-      <div className="text-body-sm text-mute">{label}</div>
-      <div className="mt-3">
-        <div className="text-[26px] font-semibold leading-8 tracking-[-1px] text-ink">{value}</div>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5 text-body-sm text-mute">
-          {delta && <Delta {...delta} />}
-          {sub}
-        </div>
-      </div>
-    </Card>
-  )
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-heading-md tabular text-ink">{value}</div>
-      <div className="text-body-sm text-mute">{label}</div>
-    </div>
   )
 }
 

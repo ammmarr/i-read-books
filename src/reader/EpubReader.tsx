@@ -18,7 +18,7 @@ import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { noteOwnPosition, syncNow } from '../lib/sync'
 import { isNative, keepScreenOn, setImmersive, setSystemBarsDark } from '../lib/native'
 import { wordFrom } from '../lib/dictionary'
-import { noteText, openXPost, xPostText } from '../lib/share'
+import { logShare, noteText, openXPost, xPostText } from '../lib/share'
 import { SubstackNoteSheet } from '../components/ShareQuote'
 import { useReadingSession } from './useReadingSession'
 import { StillReading } from './StillReading'
@@ -327,8 +327,10 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   // Sharing a quote: X opens its post screen; Substack gets a Note to check first.
   const shareQuote = (text: string, to: ShareTo) => {
     if (!text.trim()) return
-    if (to === 'x') openXPost(xPostText(text, book))
-    else setNoteDraft(noteText(text, book))
+    if (to === 'x') {
+      openXPost(xPostText(text, book))
+      logShare('x', text, book.title)
+    } else setNoteDraft(noteText(text, book))
   }
   const copyText = async (text: string) => {
     if (!text) return

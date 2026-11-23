@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, ExternalLink } from 'lucide-react'
 import { Sheet } from './ui/Sheet'
 import { Button } from './ui/Button'
-import { copyAndOpenSubstack, postSubstackNote, useExtension } from '../lib/share'
+import { copyAndOpenSubstack, logShare, postSubstackNote, useExtension } from '../lib/share'
 
 /** X's mark (for the share buttons). */
 export function XMark({ className = 'size-4' }: { className?: string }) {
@@ -40,6 +40,7 @@ export function SubstackNoteSheet({ text, onClose }: { text: string | null; onCl
   const post = async () => {
     setState({ step: 'posting' })
     const res = await postSubstackNote(draft)
+    if (res.ok) logShare('substack', draft)
     setState(res.ok ? { step: 'done' } : { step: 'error', error: res.error ?? 'Couldn’t post the Note.' })
   }
 
@@ -86,6 +87,7 @@ export function SubstackNoteSheet({ text, onClose }: { text: string | null; onCl
               <Button
                 onClick={async () => {
                   await copyAndOpenSubstack(draft)
+                  logShare('substack', draft)
                   onClose()
                 }}
               >

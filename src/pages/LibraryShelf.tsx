@@ -110,44 +110,52 @@ export function ContinueCard({ book, sessions }: { book: Book; sessions: Session
 
 const GAUGE_TICKS = 44
 
-/** Today against your daily goal as a ring of ticks (books bright, the web grey), your streak, and this week. */
-export function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
+/** Today against your daily goal as a ring of ticks: books bright, the web grey, the rest unlit. */
+export function TodayGauge({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
   const goalMin = dailyGoal(useSettings())
   const goal = goalMin * 60
   const books = todaySeconds(sessions)
   const total = books + webToday(reads)
   const met = goal > 0 && total >= goal
-  const daily = dailyTotals([...sessions, ...webSessions(reads)])
-  const s = streaks(daily)
   const litAll = goal ? Math.round(Math.min(1, total / goal) * GAUGE_TICKS) : 0
   const litBooks = goal ? Math.min(litAll, Math.round(Math.min(1, books / goal) * GAUGE_TICKS)) : 0
+  const mins = Math.floor(total / 60)
+  return (
+    <div className="relative size-[176px] shrink-0" role="img" aria-label={`Today: ${mins} of ${goalMin} minutes`}>
+      {Array.from({ length: GAUGE_TICKS }, (_, i) => (
+        <i
+          key={i}
+          className={`absolute left-1/2 top-1/2 rounded-[2px] ${i < litBooks ? 'bg-ink' : i < litAll ? 'bg-mute' : 'bg-hairline'}`}
+          style={{ width: 4, height: 18, marginLeft: -2, transformOrigin: '50% 0', transform: `rotate(${-135 + (270 * i) / (GAUGE_TICKS - 1)}deg) translateY(-82px)` }}
+        />
+      ))}
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-body-sm text-mute">Today</span>
+        <span className="text-[22px] font-medium tracking-[-0.5px] text-ink">
+          {mins}
+          <span className="text-[13px] font-normal text-mute"> / {goalMin} min</span>
+        </span>
+        <span className={`text-body-sm ${met ? 'text-success' : 'text-faint'}`}>{met ? 'Goal reached' : total > 0 ? `${Math.max(1, Math.ceil((goal - total) / 60))} min to go` : 'Not started yet'}</span>
+      </div>
+    </div>
+  )
+}
+
+/** Today against your daily goal (the gauge), your streak, and this week. */
+export function TodayCard({ sessions, reads }: { sessions: Session[]; reads: WebRead[] }) {
+  const goal = dailyGoal(useSettings()) * 60
+  const daily = dailyTotals([...sessions, ...webSessions(reads)])
+  const s = streaks(daily)
   const today = startOfDay(Date.now())
   const week = Array.from({ length: 7 }, (_, i) => {
     const d = addDays(today, i - 6)
     return { d, secs: daily.get(dayKey(d))?.seconds ?? 0, today: i === 6 }
   })
   const top = Math.max(goal, ...week.map((w) => w.secs), 1)
-  const mins = Math.floor(total / 60)
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.06, ease: [0.16, 1, 0.3, 1] }}>
       <Link to="/stats" className="flex h-full flex-col items-center rounded-md border border-hairline bg-canvas-elevated px-5 pb-4 pt-3 transition-colors hover:border-faint/40">
-        <div className="relative size-[176px]" role="img" aria-label={`Today: ${mins} of ${goalMin} minutes`}>
-          {Array.from({ length: GAUGE_TICKS }, (_, i) => (
-            <i
-              key={i}
-              className={`absolute left-1/2 top-1/2 rounded-[2px] ${i < litBooks ? 'bg-ink' : i < litAll ? 'bg-mute' : 'bg-hairline'}`}
-              style={{ width: 4, height: 18, marginLeft: -2, transformOrigin: '50% 0', transform: `rotate(${-135 + (270 * i) / (GAUGE_TICKS - 1)}deg) translateY(-82px)` }}
-            />
-          ))}
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
-            <span className="text-body-sm text-mute">Today</span>
-            <span className="text-[22px] font-medium tracking-[-0.5px] text-ink">
-              {mins}
-              <span className="text-[13px] font-normal text-mute"> / {goalMin} min</span>
-            </span>
-            <span className={`text-body-sm ${met ? 'text-success' : 'text-faint'}`}>{met ? 'Goal reached' : total > 0 ? `${Math.max(1, Math.ceil((goal - total) / 60))} min to go` : 'Not started yet'}</span>
-          </div>
-        </div>
+        <TodayGauge sessions={sessions} reads={reads} />
         <p className="-mt-1 flex items-center gap-1.5 text-body-sm text-ink">
           <Flame className={`size-3.5 ${s.readToday ? 'text-warning' : 'text-faint'}`} />
           {s.current > 0 ? `${s.current}-day streak` : 'Start a streak today'}
