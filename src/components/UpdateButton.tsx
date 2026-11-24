@@ -8,7 +8,7 @@ import { useToast } from './ui/Toast'
  * "Update" in the header whenever a newer version of I read is ready — on the
  * website, the installed PC app and the Android app. One tap installs it.
  */
-export function UpdateButton() {
+export function UpdateButton({ compact, block }: { compact?: boolean; block?: boolean } = {}) {
   const u = useUpdate()
   const { toast } = useToast()
   const busy = u.status === 'downloading' || u.status === 'applying'
@@ -47,7 +47,8 @@ export function UpdateButton() {
             void applyUpdate()
           }}
           title={u.available === 'app' ? 'A new version of the app is ready to install' : 'A new version of I read is ready'}
-          className="relative inline-flex h-8 items-center gap-1.5 overflow-hidden rounded-full bg-link px-3 text-[13px] font-medium text-white transition-colors hover:bg-link-deep disabled:opacity-90"
+          aria-label={label}
+          className={`relative inline-flex items-center overflow-hidden bg-link text-[13px] font-medium text-white transition-colors hover:bg-link-deep disabled:opacity-90 ${compact ? 'size-9 justify-center rounded-full' : `h-8 gap-1.5 rounded-full px-3 ${block ? 'w-full justify-center' : ''}`}`}
         >
           {u.status === 'downloading' && (
             <motion.span
@@ -66,9 +67,9 @@ export function UpdateButton() {
               <RefreshCw className="size-4" />
             )}
           </span>
-          <span className="relative tabular">{label}</span>
+          {!compact && <span className="relative tabular">{label}</span>}
           {!busy && (
-            <span aria-hidden className="relative ml-0.5 flex size-1.5">
+            <span aria-hidden className={compact ? 'absolute right-1.5 top-1.5 flex size-1.5' : 'relative ml-0.5 flex size-1.5'}>
               <span className="absolute inset-0 animate-ping rounded-full bg-white/70" />
               <span className="relative size-1.5 rounded-full bg-white" />
             </span>

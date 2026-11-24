@@ -68,7 +68,7 @@ export function ThemeToggle() {
   );
 }
 
-function StreakChip() {
+function StreakChip({ compact }: { compact?: boolean } = {}) {
   const s = useLiveQuery(
     // Any reading keeps the streak going — books or Substack.
     async () => streaks(dailyTotals([...(await db.sessions.toArray()), ...webSessions(await db.webReads.toArray())])),
@@ -83,7 +83,7 @@ function StreakChip() {
           ? `${s.current}-day streak`
           : `${s.current}-day streak — read today to keep it`
       }
-      className="inline-flex h-8 items-center gap-1.5 rounded-full border border-hairline bg-canvas-elevated px-2.5 text-label-sm text-ink transition-colors hover:bg-hairline-soft"
+      className={`inline-flex items-center rounded-full border border-hairline bg-canvas-elevated text-label-sm text-ink transition-colors hover:bg-hairline-soft ${compact ? 'h-11 w-9 flex-col justify-center gap-0 text-[11px] leading-tight' : 'h-8 gap-1.5 px-2.5'}`}
     >
       <Flame
         className={`size-4 ${s.readToday ? "fill-warning/30 text-warning" : "text-faint"}`}
@@ -221,7 +221,7 @@ function Sidebar({ section, search }: { section: string; search: string }) {
         key={n.to}
         to={n.to}
         title={mini ? n.label : undefined}
-        className={`relative flex h-9 items-center gap-2.5 rounded-sm px-2.5 text-label-sm transition-colors ${active ? "text-ink" : "text-body hover:bg-hairline-soft hover:text-ink"} ${mini ? "justify-center px-0" : ""}`}
+        className={`relative flex h-9 items-center gap-2.5 rounded-sm px-2.5 text-label-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-link/40 ${active ? "text-ink" : "text-body hover:bg-hairline-soft hover:text-ink"} ${mini ? "justify-center px-0" : ""}`}
       >
         {active && (
           <motion.span
@@ -262,11 +262,14 @@ function Sidebar({ section, search }: { section: string; search: string }) {
         ))}
       </nav>
       {!mini && <ReadingNow />}
+      {/* Update and Install get a row of their own: open, full width; folded, a round icon. */}
+      <div className={`mt-2 flex flex-col gap-1.5 empty:hidden ${mini ? "items-center" : ""}`}>
+        <UpdateButton compact={mini} block={!mini} />
+        <InstallButton compact={mini} block={!mini} />
+      </div>
       <div className={`mt-2 flex items-center gap-1 ${mini ? "flex-col" : "px-1"}`}>
-        <StreakChip />
-        <div className={mini ? "contents" : "ml-auto flex items-center gap-0.5"}>
-          <UpdateButton />
-          <InstallButton />
+        <StreakChip compact={mini} />
+        <div className={mini ? "flex flex-col items-center gap-1" : "ml-auto flex items-center gap-0.5"}>
           <SyncIndicator />
           <ThemeToggle />
         </div>
