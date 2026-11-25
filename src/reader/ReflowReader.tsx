@@ -1,21 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ChevronLeft, ChevronRight, FileText, Minus, Plus, Trophy, Type } from 'lucide-react'
+import { FileText, Minus, Plus, Trophy, Type } from 'lucide-react'
 import { db, type Book } from '../db/db'
 import { setStatus } from '../db/books'
 import type { PDFDocumentProxy } from '../lib/pdf'
 import { dailyGoal, updateSettings, useSettings, type PageTheme } from '../lib/settings'
 import { useIsDark } from '../lib/theme'
-import { useIsMobile, vibrate } from '../lib/hooks'
+import { vibrate } from '../lib/hooks'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
 import { noteOwnPosition } from '../lib/sync'
-import { IconButton } from '../components/ui/Button'
 import { Sheet } from '../components/ui/Sheet'
 import { Segmented } from '../components/ui/Segmented'
 import { useToast } from '../components/ui/Toast'
 import { NightShiftQuick } from '../components/NightShift'
 import { ReflowText, type ReflowPage } from './reflow'
-import { GoToPage, leaveReader, Scrubber } from './ReaderControls'
+import { GoToPage, leaveReader, SectionScrubber } from './ReaderControls'
 import { useReadingSession } from './useReadingSession'
 import { StillReading } from './StillReading'
 import { ReadingClock } from './ReadingClock'
@@ -60,6 +59,7 @@ const PALETTES: Record<'paper' | 'sepia' | 'sepiaDark' | 'night', { bg: string; 
   night: { bg: '#171717', fg: '#d6d3cd', mute: '#77746e', rule: '#2b2b2b' },
 }
 
+const NO_CHAPTER = () => undefined
 const NO_BOOKMARKS = new Set<number>()
 
 export function ReflowReader({ book, doc, onExit }: { book: Book; doc: PDFDocumentProxy; onExit: () => void }) {
@@ -90,9 +90,6 @@ export function ReflowReader({ book, doc, onExit }: { book: Book; doc: PDFDocume
   const currentRef = useRef(currentPage)
   const [chrome, setChrome] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  // The island's tool tray.
-  const [tray, setTray] = useState(false)
-  const mobile = useIsMobile()
   const count = book.pageCount
 
   // ── Where you are ───────────────────────────────────────────────────
@@ -347,25 +344,9 @@ export function ReflowReader({ book, doc, onExit }: { book: Book; doc: PDFDocume
         title={book.title}
         sub={`Reading view · page ${currentPage + 1} of ${count}`}
         onBack={() => leaveReader(navigate)}
-        tray={tray}
-        setTray={setTray}
-        center={
+        bottom={
           <>
-            {!mobile && (
-              <IconButton label="Previous page" size="icon-sm" onClick={() => scrollToPage(currentPage - 1, 0, true)} disabled={currentPage === 0}>
-                <ChevronLeft className="size-4" />
-              </IconButton>
-            )}
-            {!mobile && (
-              <div className="flex w-[200px] lg:w-[280px]">
-                <Scrubber page={currentPage} count={count} chapterFor={() => undefined} bookmarks={NO_BOOKMARKS} onScrub={(p) => scrollToPage(p)} />
-              </div>
-            )}
-            {!mobile && (
-              <IconButton label="Next page" size="icon-sm" onClick={() => scrollToPage(currentPage + 1, 0, true)} disabled={currentPage >= count - 1}>
-                <ChevronRight className="size-4" />
-              </IconButton>
-            )}
+            <SectionScrubber page={currentPage} count={count} chapterFor={NO_CHAPTER} bookmarks={NO_BOOKMARKS} onScrub={(p) => scrollToPage(p)} />
             <GoToPage page={currentPage} count={count} onGo={(p) => scrollToPage(p)} progress={readSet.current.size / Math.max(1, count)} />
           </>
         }

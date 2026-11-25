@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence } from 'motion/react'
-import { BookA, Bookmark as BookmarkIcon, ChevronLeft, ChevronRight, FoldHorizontal, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Trophy, Type, UnfoldHorizontal } from 'lucide-react'
+import { BookA, Bookmark as BookmarkIcon, FoldHorizontal, Keyboard, Maximize, Minimize, Minus, PanelLeft, Plus, Search, Trophy, Type, UnfoldHorizontal } from 'lucide-react'
 import type { FoliateBook, FoliateTocItem } from 'foliate-js/view.js'
 import { EpubScroller, type NoteCard, type PageLook, type ScrollLocation, type SearchHit } from './epubScroller'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor } from '../db/db'
 import { setStatus } from '../db/books'
-import { Button, IconButton } from '../components/ui/Button'
+import { Button } from '../components/ui/Button'
 import { Sheet } from '../components/ui/Sheet'
 import { useToast } from '../components/ui/Toast'
 import { dailyGoal, updateSettings, useSettings, type PageTheme } from '../lib/settings'
@@ -28,7 +28,7 @@ import { HL_COLORS, HighlightPopover, SelectionToolbar, type ShareTo } from './H
 import { DefinePopover, type DefineTarget } from './DefinePopover'
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { SearchPanel } from './SearchPanel'
-import { ElsewherePill, GoToPage, leaveReader, PlacePill, Scrubber } from './ReaderControls'
+import { ElsewherePill, GoToPage, leaveReader, PlacePill, SectionScrubber } from './ReaderControls'
 import type { Match } from './textIndex'
 import { sentenceAround } from './wordAt'
 import type { OpenAt } from './Reader'
@@ -191,8 +191,6 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
   const [fullscreen, setFullscreen] = useState(!!document.fullscreenElement)
   const [typeOpen, setTypeOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
-  // The island's tool tray.
-  const [tray, setTray] = useState(false)
   const [type, setType] = useState<TypePrefs>(loadType)
   const [note, setNote] = useState<NoteCard | null>(null)
 
@@ -1142,7 +1140,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
         )}
       </AnimatePresence>
 
-      {/* ── The island: back, where you are, the clock, and the tools ── */}
+      {/* ── The edges: title and clock on top, every tool on the right, chapters along the bottom ── */}
       <ReaderIsland
         show={chrome}
         title={book.title}
@@ -1153,25 +1151,9 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
           </>
         }
         onBack={() => leaveReader(navigate)}
-        tray={tray}
-        setTray={setTray}
-        center={
+        bottom={
           <>
-            {!touch && (
-              <IconButton label="Previous screen (←)" size="icon-sm" onClick={() => (touched(), void viewRef.current?.prev())}>
-                <ChevronLeft className="size-4" />
-              </IconButton>
-            )}
-            {!touch && (
-              <div className="hidden w-[200px] sm:flex lg:w-[280px]">
-                <Scrubber page={here} count={total} chapterFor={chapterFor} bookmarks={bmPages} onScrub={goToPage} />
-              </div>
-            )}
-            {!touch && (
-              <IconButton label="Next screen (→)" size="icon-sm" onClick={() => (touched(), void viewRef.current?.next())}>
-                <ChevronRight className="size-4" />
-              </IconButton>
-            )}
+            <SectionScrubber page={here} count={total} chapterFor={chapterFor} bookmarks={bmPages} onScrub={goToPage} />
             <GoToPage page={here} count={total} onGo={goToPage} progress={readN / Math.max(1, total)} />
           </>
         }
@@ -1180,6 +1162,7 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
           { key: 'toc', label: 'Contents', icon: <PanelLeft className="size-[18px]" />, onClick: () => setTocOpen(true) },
           { key: 'search', label: 'Search', icon: <Search className="size-[18px]" />, active: searchOpen, onClick: () => (searchOpen ? closeSearch() : setSearchOpen(true)) },
           {
+            gap: true,
             key: 'lookup',
             label: lookupOn ? 'Stop look-up' : 'Look up',
             icon: <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />,
@@ -1192,10 +1175,10 @@ export function EpubReader({ book, ebook, openAt }: { book: Book; ebook: Foliate
             },
           },
           { key: 'bookmark', label: markedHere ? 'Bookmarked' : 'Bookmark', icon: <BookmarkIcon className={`size-[18px] ${markedHere ? 'fill-link text-link' : ''}`} />, active: !!markedHere, onClick: () => void toggleBookmark() },
-          { key: 'wide', label: type.wide ? 'Comfortable column' : 'Fill the screen', icon: type.wide ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />, active: type.wide, onClick: () => setType((t) => ({ ...t, wide: !t.wide })), hidden: touch },
+          { gap: true, key: 'wide', label: type.wide ? 'Comfortable column' : 'Fill the screen', icon: type.wide ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />, active: type.wide, onClick: () => setType((t) => ({ ...t, wide: !t.wide })), hidden: touch },
           { key: 'type', label: 'Text and page', icon: <Type className="size-[18px]" />, onClick: () => setTypeOpen(true) },
-          { key: 'smaller', label: 'Smaller text', icon: <Minus className="size-[18px]" />, onClick: () => zoom(-1), keepOpen: true, hidden: touch },
-          { key: 'bigger', label: 'Bigger text', icon: <Plus className="size-[18px]" />, onClick: () => zoom(1), keepOpen: true, hidden: touch },
+          { gap: true, key: 'smaller', label: 'Smaller text', icon: <Minus className="size-[18px]" />, onClick: () => zoom(-1), hidden: touch },
+          { key: 'bigger', label: 'Bigger text', icon: <Plus className="size-[18px]" />, onClick: () => zoom(1), hidden: touch },
           { key: 'keys', label: 'Shortcuts', icon: <Keyboard className="size-[18px]" />, onClick: () => setShortcutsOpen(true), hidden: touch },
           { key: 'full', label: fullscreen ? 'Exit full screen' : 'Full screen', icon: fullscreen ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />, onClick: toggleFullscreen, hidden: !(isNative || document.fullscreenEnabled) },
         ]}

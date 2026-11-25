@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { AnimatePresence, motion } from 'motion/react'
 import {
-  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, ChevronLeft, ChevronRight, Keyboard, Maximize, Minimize, Minus, PanelLeft, TextAlignStart, Plus, Search, Trophy, Type,
+  ArrowLeft, BookA, Bookmark as BookmarkIcon, FoldHorizontal, NotebookPen, UnfoldHorizontal, Keyboard, Maximize, Minimize, Minus, PanelLeft, TextAlignStart, Plus, Search, Trophy, Type,
 } from 'lucide-react'
 import { db, uid, type Book, type Bookmark, type Highlight, type HighlightColor, type NormRect, type Recap } from '../db/db'
 import { setStatus } from '../db/books'
@@ -27,7 +27,7 @@ import { extendSelectionOver, highlightsUnder, mergeRects, selectionBox, selecti
 import { ReaderSidebar, type SidebarTab } from './ReaderSidebar'
 import { ReaderSettings } from './ReaderSettings'
 import { SearchPanel } from './SearchPanel'
-import { ElsewherePill, GoToPage, leaveReader, PlacePill, Scrubber } from './ReaderControls'
+import { ElsewherePill, GoToPage, leaveReader, PlacePill, SectionScrubber } from './ReaderControls'
 import { useReadingSession } from './useReadingSession'
 import { useImporter } from '../components/Importer'
 import { dwellFor as dwellFor_, formatPages, readPagesOf } from '../lib/pages'
@@ -607,8 +607,6 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
   const scrollState = useRef({ last: 0, down: 0, up: 0, quietUntil: 0 })
   const panelsOpen = sidebar.open || settingsOpen || shortcutsOpen
   const [searchOpen, setSearchOpen] = useState(false)
-  // The island's tool tray.
-  const [tray, setTray] = useState(false)
   const lockChrome = panelsOpen || searchOpen
   const lockRef = useRef(lockChrome)
   lockRef.current = lockChrome || !settings.autoHideChrome
@@ -1743,6 +1741,7 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
     return m
   }, [highlights])
   const bmPages = useMemo(() => new Set(bookmarks.map((b) => b.page)), [bookmarks])
+  const hlPages = useMemo(() => new Set(highlights.map((h) => h.page)), [highlights])
 
   const pages = []
   for (let i = range[0]; i <= range[1] && i < layout.tops.length; i++) {
@@ -1809,40 +1808,25 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
         )}
       </AnimatePresence>
 
-      {/* ── The island: back, where you are, the clock, and the tools ── */}
+      {/* ── The edges: title and clock on top, every tool on the right, chapters along the bottom ── */}
       <ReaderIsland
         show={chrome}
         title={book.title}
         sub={chapter ?? book.author ?? undefined}
         onBack={() => leaveReader(navigate)}
-        tray={tray}
-        setTray={setTray}
-        center={
+        bottom={
           <>
-            {!mobile && (
-              <IconButton label="Previous page (←)" size="icon-sm" onClick={() => scrollToPage(currentPage - 1, { smooth: true })} disabled={currentPage === 0}>
-                <ChevronLeft className="size-4" />
-              </IconButton>
-            )}
-            {!mobile && (
-              <div className="flex w-[200px] lg:w-[280px]">
-                <Scrubber
-                  page={currentPage}
-                  count={book.pageCount}
-                  chapterFor={chapterFor}
-                  bookmarks={bmPages}
-                  onScrub={(p) => {
-                    holdPlace(p, false)
-                    scrollToPage(p)
-                  }}
-                />
-              </div>
-            )}
-            {!mobile && (
-              <IconButton label="Next page (→)" size="icon-sm" onClick={() => scrollToPage(currentPage + 1, { smooth: true })} disabled={currentPage >= book.pageCount - 1}>
-                <ChevronRight className="size-4" />
-              </IconButton>
-            )}
+            <SectionScrubber
+              page={currentPage}
+              count={book.pageCount}
+              chapterFor={chapterFor}
+              bookmarks={bmPages}
+              marks={hlPages}
+              onScrub={(p) => {
+                holdPlace(p, false)
+                scrollToPage(p)
+              }}
+            />
             <GoToPage
               page={currentPage}
               count={book.pageCount}
@@ -1874,6 +1858,7 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
               }
             : { key: 'recap', label: 'Recap', icon: <NotebookPen className="size-[18px]" />, onClick: recapHere },
           {
+            gap: true,
             key: 'lookup',
             label: lookupOn ? 'Stop look-up' : 'Look up',
             icon: <BookA className={`size-[18px] ${lookupOn ? 'text-link' : ''}`} />,
@@ -1885,11 +1870,11 @@ function ReaderView({ book, doc, openAt, onReflow }: { book: Book; doc: PDFDocum
             },
           },
           { key: 'bookmark', label: bookmarked ? 'Bookmarked' : 'Bookmark', icon: <BookmarkIcon className={`size-[18px] ${bookmarked ? 'fill-link text-link' : ''}`} />, active: bookmarked, onClick: () => void toggleBookmark() },
-          { key: 'width', label: view.mode === 'width' ? 'Normal width' : 'Fit width', icon: view.mode === 'width' ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />, active: view.mode === 'width', onClick: toggleFitWidth },
+          { gap: true, key: 'width', label: view.mode === 'width' ? 'Normal width' : 'Fit width', icon: view.mode === 'width' ? <FoldHorizontal className="size-[18px]" /> : <UnfoldHorizontal className="size-[18px]" />, active: view.mode === 'width', onClick: toggleFitWidth },
           { key: 'reflow', label: 'Reading view', icon: <TextAlignStart className="size-[18px]" />, onClick: onReflow },
           { key: 'display', label: 'Display', icon: <Type className="size-[18px]" />, onClick: () => setSettingsOpen(true) },
-          { key: 'zoomout', label: 'Zoom out', icon: <Minus className="size-[18px]" />, onClick: () => stepZoom(-1), keepOpen: true, hidden: mobile },
-          { key: 'zoomin', label: 'Zoom in', icon: <Plus className="size-[18px]" />, onClick: () => stepZoom(1), keepOpen: true, hidden: mobile },
+          { gap: true, key: 'zoomout', label: 'Zoom out', icon: <Minus className="size-[18px]" />, onClick: () => stepZoom(-1), hidden: mobile },
+          { key: 'zoomin', label: 'Zoom in', icon: <Plus className="size-[18px]" />, onClick: () => stepZoom(1), hidden: mobile },
           { key: 'keys', label: 'Shortcuts', icon: <Keyboard className="size-[18px]" />, onClick: () => setShortcutsOpen(true), hidden: touch },
           { key: 'full', label: fullscreen ? 'Exit full screen' : 'Full screen', icon: fullscreen ? <Minimize className="size-[18px]" /> : <Maximize className="size-[18px]" />, onClick: toggleFullscreen, hidden: !(isNative || document.fullscreenEnabled) },
         ]}

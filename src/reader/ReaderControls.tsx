@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from 'react'
+import { useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { NavigateFunction } from 'react-router'
 import { AnimatePresence, motion } from 'motion/react'
 import { CornerUpLeft, MonitorSmartphone, X as XIcon } from 'lucide-react'
@@ -171,5 +171,123 @@ export function PlacePill({ page, chrome, onBack, onStay }: { page: number | nul
         </motion.div>
       )}
     </AnimatePresence>
+  )
+}
+
+/**
+ * Where you are, as the book's chapters side by side: each section as wide as
+ * its pages, filled up to where you are. Point at it to see the chapter and
+ * page; press or drag to go there. Bookmarks are ticks above, highlights dots.
+ */
+export function SectionScrubber({
+  page, count, chapterFor, bookmarks, marks, onScrub,
+}: {
+  page: number
+  count: number
+  chapterFor: (p: number) => string | undefined
+  bookmarks: Set<number>
+  /** Pages with highlights. */
+  marks?: Set<number>
+  onScrub: (p: number) => void
+}) {
+  const track = useRef<HTMLDivElement>(null)
+  const [hover, setHover] = useState<number | null>(null)
+  const [drag, setDrag] = useState(false)
+  // Runs of pages under the same chapter name (one section if the book has no contents).
+  const sections = useMemo(() => {
+    const out: { from: number; to: number; title?: string }[] = []
+    for (let p = 0; p < count; p++) {
+      const t = chapterFor(p)
+      const last = out[out.length - 1]
+      if (last && last.title === t) last.to = p
+      else out.push({ from: p, to: p, title: t })
+    }
+    // Very short runs (a title page, a blank) join the one before, so the bar stays readable.
+    const merged: typeof out = []
+    for (const s of out) {
+      const last = merged[merged.length - 1]
+      if (last && s.to - s.from < Math.max(1, count / 120)) last.to = s.to
+      else merged.push({ ...s })
+    }
+    return merged.length ? merged : [{ from: 0, to: Math.max(0, count - 1) }]
+  }, [count, chapterFor])
+  const pageAt = (clientX: number) => {
+    const r = track.current?.getBoundingClientRect()
+    if (!r || count < 1) return 0
+    return Math.max(0, Math.min(count - 1, Math.round(((clientX - r.left) / r.width) * (count - 1))))
+  }
+  const at = hover ?? page
+  const pct = (p: number) => (count > 1 ? (p / (count - 1)) * 100 : 0)
+  const showTip = hover != null
+  return (
+    <div className="relative flex h-8 min-w-0 flex-1 items-center">
+      {showTip && (
+        <div
+          className="pointer-events-none absolute bottom-[calc(100%+6px)] z-10 max-w-[240px] -translate-x-1/2 rounded-sm bg-ink px-2.5 py-1.5 text-center text-canvas shadow-floating"
+          style={{ left: `clamp(60px, ${pct(at)}%, calc(100% - 60px))` }}
+        >
+          <div className="text-label-sm tabular">Page {at + 1}</div>
+          {chapterFor(at) && <div className="truncate text-[11px] opacity-70">{chapterFor(at)}</div>}
+        </div>
+      )}
+      <div
+        ref={track}
+        role="slider"
+        tabIndex={0}
+        aria-label="Page"
+        aria-valuemin={1}
+        aria-valuemax={count}
+        aria-valuenow={page + 1}
+        aria-valuetext={`Page ${page + 1}${chapterFor(page) ? `, ${chapterFor(page)}` : ''}`}
+        onPointerMove={(e) => {
+          const p = pageAt(e.clientX)
+          setHover(p)
+          if (drag) onScrub(p)
+        }}
+        onPointerLeave={() => !drag && setHover(null)}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          setDrag(true)
+          const p = pageAt(e.clientX)
+          setHover(p)
+          onScrub(p)
+        }}
+        onPointerUp={() => {
+          setDrag(false)
+          setHover(null)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowRight' || e.key === 'ArrowUp') onScrub(Math.min(count - 1, page + 1))
+          else if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') onScrub(Math.max(0, page - 1))
+          else return
+          e.preventDefault()
+        }}
+        className="group/s relative flex h-full w-full cursor-pointer touch-none items-center gap-[2px] outline-none focus-visible:ring-2 focus-visible:ring-link/40"
+      >
+        {sections.map((s) => {
+          const len = s.to - s.from + 1
+          const fill = page >= s.to ? 100 : page < s.from ? 0 : ((page - s.from + 1) / len) * 100
+          const here = at >= s.from && at <= s.to && hover != null
+          return (
+            <span
+              key={s.from}
+              className={`relative h-1 overflow-hidden rounded-[2px] transition-[height,background-color] duration-150 group-hover/s:h-[7px] ${here ? 'bg-faint/70' : 'bg-hairline'}`}
+              style={{ flex: `${len} 1 0` }}
+            >
+              <i className="absolute inset-y-0 left-0 rounded-[2px] bg-ink" style={{ width: `${fill}%` }} />
+            </span>
+          )
+        })}
+        {/* bookmarks and highlights along the track */}
+        <span className="pointer-events-none absolute inset-x-0 top-1/2 h-0">
+          {[...bookmarks].map((b) => (
+            <span key={`b${b}`} className="absolute -top-[9px] h-[5px] w-[2px] -translate-x-1/2 rounded-full bg-link" style={{ left: `${pct(b)}%` }} />
+          ))}
+          {[...(marks ?? [])].map((m) => (
+            <span key={`m${m}`} className="absolute -top-[8px] size-[3px] -translate-x-1/2 rounded-full bg-warning" style={{ left: `${pct(m)}%` }} />
+          ))}
+        </span>
+      </div>
+    </div>
   )
 }
